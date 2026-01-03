@@ -38,28 +38,105 @@ export function getCustomDensityFunction(name: string, noise_settings_id: Identi
 		?? idIfExists(new Identifier("minecraft", name))
 }
 
-const zenith = 20.0 * Math.PI / 180.0;
-const azimuth = 135.0 * Math.PI / 180.0;
+/**
+ * 簡化版 Hillshade - 完全按照 cubiomes-viewer 的實現
+ *
+ * cubiomes world.cpp:
+ *   d0 = t[0][1] + t[1][0]  // North + West
+ *   d1 = t[1][2] + t[2][1]  // East + South
+ *   light = 1.0 + (d1 - d0) * 0.25 / scale
+ *
+ * 西北光源效果：當地形向東南傾斜時 (d1 > d0)，光照增強
+ *
+ * @param hN 北方高度
+ * @param hS 南方高度
+ * @param hE 東方高度
+ * @param hW 西方高度
+ * @param scale 縮放因子
+ * @param invert 反轉光照方向（用於座標系與 cubiomes 方向相反時）
+ */
+export function calculateHillshadeSimple(hN: number, hS: number, hE: number, hW: number, scale: number, invert = false): number {
+	const d0 = hN + hW;  // 西北
+	const d1 = hS + hE;  // 東南
+	const mul = 0.25 / scale;
 
+	const delta = invert ? (d0 - d1) : (d1 - d0);
+	let light = 1.0 + delta * mul;
+
+	if (light < 0.5) light = 0.5;
+	if (light > 1.5) light = 1.5;
+
+	return light;
+}
+
+// 保留舊函數以防需要
 export function calculateHillshade(slope_x: number, slope_z: number, scale: number): number {
-	const slope = Math.atan(Math.sqrt(slope_x * slope_x + slope_z * slope_z) / (8 * scale));
-	let aspect;
-	if (slope_x == 0.0) {
-		if (slope_z < 0.0) {
-			aspect = Math.PI;
-		} else {
-			aspect = 0.0;
-		}
-	} else {
-		aspect = Math.atan2(slope_z, -slope_x);
-	}
+	return calculateHillshadeSimple(0, slope_z, slope_x, 0, scale);
+}
 
-	let hillshade = ((Math.cos(zenith) * Math.cos(slope)) + (Math.sin(zenith) * Math.sin(slope) * Math.cos(azimuth - aspect)));
-	if (hillshade < 0.0)
-		hillshade = 0.0;
+/**
+ * 雙線性插值 - 用於平滑 surface 高度
+ * @param grid 二維數組（需有 padding，索引從 0 開始）
+ * @param x 浮點數 x 座標（0 到 gridSize-1）
+ * @param z 浮點數 z 座標（0 到 gridSize-1）
+ * @param getValue 獲取網格值的函數
+ */
+export function bilinearInterpolate(
+	grid: { surface: number }[][],
+	x: number,
+	z: number
+): number {
+	const x0 = Math.floor(x)
+	const z0 = Math.floor(z)
+	const x1 = x0 + 1
+	const z1 = z0 + 1
+	const fx = x - x0
+	const fz = z - z0
 
-	hillshade = hillshade * 0.7 + 0.3;
-	return hillshade
+	// 確保索引在有效範圍內（grid 已有 +1 padding）
+	const v00 = grid[x0 + 1]?.[z0 + 1]?.surface ?? 0
+	const v10 = grid[x1 + 1]?.[z0 + 1]?.surface ?? v00
+	const v01 = grid[x0 + 1]?.[z1 + 1]?.surface ?? v00
+	const v11 = grid[x1 + 1]?.[z1 + 1]?.surface ?? v00
+
+	// 雙線性插值公式
+	return v00 * (1 - fx) * (1 - fz)
+		+ v10 * fx * (1 - fz)
+		+ v01 * (1 - fx) * fz
+		+ v11 * fx * fz
+}
+
+/**
+ * 計算單個像素的平滑 hillshade
+ * @param px 像素 x 座標 (0-255)
+ * @param pz 像素 z 座標 (0-255)
+ * @param grid surface 高度網格 (64x64 + padding)
+ * @param scale 像素到網格的比例 (通常為 4)
+ * @param step 世界座標步長
+ */
+export function calculateSmoothHillshade(
+	px: number,
+	pz: number,
+	grid: { surface: number }[][],
+	scale: number,
+	step: number
+): number {
+	// 將像素座標轉換為網格座標
+	const gx = px / scale
+	const gz = pz / scale
+
+	// 用插值獲取當前和鄰近點的高度
+	const hE = bilinearInterpolate(grid, gx + 0.5 / scale, gz)
+	const hW = bilinearInterpolate(grid, gx - 0.5 / scale, gz)
+	const hS = bilinearInterpolate(grid, gx, gz + 0.5 / scale)
+	const hN = bilinearInterpolate(grid, gx, gz - 0.5 / scale)
+
+	// 計算坡度（使用中心差分）
+	const slope_x = hE - hW
+	const slope_z = hS - hN
+
+	// 使用現有的 hillshade 計算
+	return calculateHillshade(slope_x, slope_z, step / scale)
 }
 
 export function hashCode(str: string) {

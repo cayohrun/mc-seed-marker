@@ -103,9 +103,9 @@ export default defineConfig({
         clientsClaim: true
       },
       manifest: {
-        name: 'Minecraft Datapack Map',
-        short_name: 'MC Datapack Map',
-        description: 'A Minecraft biome map capable of handling worldgen datapacks.',
+        name: 'MC Seed Marker',
+        short_name: 'MC Seed Marker',
+        description: 'Minecraft 種子地圖視覺化工具，支援結構標記和備註功能。',
         theme_color: '#03213a',
         icons: [
           {

@@ -56,6 +56,18 @@ function randomizeSeed() {
             }" type="text" />
 
         </div>
+        <div class="setting">
+            <div class="title">{{ i18n.t('settings.contour.label', '等高線') }}</div>
+            <input
+                type="range"
+                min="0"
+                max="50"
+                step="5"
+                v-model.number="settingsStore.contourInterval"
+                :aria-label="i18n.t('settings.contour.aria-label', '等高線間隔')"
+            />
+            <span class="contour-value">{{ settingsStore.contourInterval === 0 ? i18n.t('settings.contour.off', '關閉') : settingsStore.contourInterval }}</span>
+        </div>
     </div>
 </template>
 
@@ -111,4 +123,30 @@ input {
     color: black;
     border-radius: 0.3rem;
     border: 2px solid rgb(55, 120, 173);
+}
+
+input[type="range"] {
+    height: 0.5rem;
+    padding: 0;
+    cursor: pointer;
+    border: none;
+    background: linear-gradient(to right, rgb(55, 120, 173) 0%, rgb(55, 120, 173) 100%);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 1rem;
+    height: 1rem;
+    background: white;
+    border-radius: 50%;
+    border: 2px solid rgb(55, 120, 173);
+    cursor: pointer;
+}
+
+.contour-value {
+    min-width: 2.5rem;
+    text-align: center;
+    font-size: 0.9rem;
+    color: white;
 }</style>

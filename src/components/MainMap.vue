@@ -74,7 +74,15 @@ onMounted(() => {
         maxZoom: 1,
         center: [0, 0],
         zoomControl: false,
-        crs: L.CRS.Simple
+        crs: L.CRS.Simple,
+        // 優化縮放動畫
+        zoomAnimation: true,
+        zoomAnimationThreshold: 4,
+        fadeAnimation: true,
+        markerZoomAnimation: true,
+        zoomSnap: 0.5,           // 允許半格縮放，更細膩
+        zoomDelta: 0.5,          // 每次縮放 0.5 級
+        wheelPxPerZoomLevel: 120 // 滾輪縮放靈敏度
     })
 
     zoom = L.control.zoom({

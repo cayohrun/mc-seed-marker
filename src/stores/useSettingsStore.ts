@@ -11,7 +11,8 @@ export const useSettingsStore = defineStore('settings', () => {
         mc_version: "1_21_7",
         world_preset: "minecraft:normal",
         dimension: "minecraft:overworld",
-        seed: "0"
+        seed: "0",
+        contourInterval: "10"  // 等高線間隔（格數）
     }
 
     const uri = window.location.search.substring(1)
@@ -31,6 +32,7 @@ export const useSettingsStore = defineStore('settings', () => {
     const world_preset = ref(Identifier.parse(params.world_preset))
     const dimension = ref(Identifier.parse(params.dimension))
     const seed = ref(parseSeed(params.seed))
+    const contourInterval = ref(parseInt(params.contourInterval) || 10)  // 等高線間隔
 
     const datapackStore = useDatapackStore()
 
@@ -81,5 +83,5 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
 
-    return {mc_version, world_preset, dimension, seed, collator, dev_mode, getLocalizedName}
+    return {mc_version, world_preset, dimension, seed, collator, dev_mode, getLocalizedName, contourInterval}
 })

@@ -1,7 +1,7 @@
 import * as L from "leaflet"
 //import { last, range, takeWhile } from "lodash";
 import { Climate } from "deepslate";
-import { calculateHillshade, getCustomDensityFunction, hashCode } from "../util.js";
+import { calculateHillshadeSimple, getCustomDensityFunction, hashCode } from "../util.js";
 import MultiNoiseCalculator from "../webworker/MultiNoiseCalculator?worker"
 import { useSearchStore } from "../stores/useBiomeSearchStore.js";
 import { useLoadedDimensionStore } from "../stores/useLoadedDimensionStore.js";
@@ -49,7 +49,7 @@ export class BiomeLayer extends L.GridLayer {
 	constructor(options: L.GridLayerOptions, private do_hillshade: Ref<boolean>, private show_sealevel: Ref<boolean>, private project_down: Ref<boolean>, private y: Ref<number>) {
 		super(options)
 		this.tileSize = options.tileSize as number
-		this.calcResolution = 1 / 4
+		this.calcResolution = 1 / 4  // 恢復原設定
 
 		this.createWorkers()
 		this.datapackLoader = this.updateWorkers({
@@ -76,6 +76,10 @@ export class BiomeLayer extends L.GridLayer {
 		})
 
 		watch(show_sealevel, () => {
+			this.rerender()
+		})
+
+		watch(() => this.settingsStore.contourInterval, () => {
 			this.rerender()
 		})
 
@@ -120,9 +124,20 @@ export class BiomeLayer extends L.GridLayer {
 		const do_hillshade = this.do_hillshade.value
 		const show_sealevel = this.show_sealevel.value
 		const getBiomeColor = this.loadedDimensionStore.getBiomeColor
+		const contourInterval = this.settingsStore.contourInterval
+		const gridSize = this.tileSize * this.calcResolution  // 64
+		const pixelSize = 1 / this.calcResolution  // 4
 
-		for (let x = 0; x < this.tileSize * this.calcResolution; x++) {
-			for (let z = 0; z < this.tileSize * this.calcResolution; z++) {
+		// === 第一階段：繪製生態系+hillshade 到小 canvas，然後用平滑縮放 ===
+		// 創建 offscreen canvas（小尺寸）
+		const smallCanvas = document.createElement('canvas')
+		smallCanvas.width = gridSize
+		smallCanvas.height = gridSize
+		const smallCtx = smallCanvas.getContext('2d')!
+
+		// 繪製生態系+hillshade 到小 canvas（1:1）
+		for (let x = 0; x < gridSize; x++) {
+			for (let z = 0; z < gridSize; z++) {
 				const biome = tile.array[x + 1][z + 1].biome
 
 				if (this.searchStore.biomes.size > 0
@@ -132,31 +147,93 @@ export class BiomeLayer extends L.GridLayer {
 					continue
 				}
 
-				let hillshade = 1.0
-				const y = project_down ? Math.min(tile.array[x + 1][z + 1].surface, this.y.value) : this.y.value
-				const belowSurface = y < tile.array[x + 1][z + 1].surface
-				if (do_hillshade && tile.array[x + 1][z + 1].terrain < 0){
-					hillshade = 0.15
-				} else if (do_hillshade && project_down && !belowSurface) {
-
-					hillshade = calculateHillshade(
-						tile.array[x + 2][z + 1].surface - tile.array[x][z + 1].surface,
-						tile.array[x + 1][z + 2].surface - tile.array[x + 1][z].surface,
-						tile.step
-					)
-				}
-
 				let biomeColor = getBiomeColor(biome)
-				tile.ctx.fillStyle = `rgb(${biomeColor.r * hillshade}, ${biomeColor.g * hillshade}, ${biomeColor.b * hillshade})`
 
-				tile.ctx.fillRect(x / this.calcResolution, z / this.calcResolution, 1 / this.calcResolution, 1 / this.calcResolution)
+				// 在小 canvas 階段就套用 hillshade
+				if (do_hillshade && project_down) {
+					const terrain = tile.array[x + 1]?.[z + 1]?.terrain ?? 0
+					let hillshade: number
 
-				if (show_sealevel && !belowSurface) {
-					if (y < this.loadedDimensionStore.noise_generator_settings.seaLevel - 2) {
-						tile.ctx.drawImage(waveImage, x / this.calcResolution % 16, z / this.calcResolution % 16, 4, 4, x / this.calcResolution, z / this.calcResolution, 4, 4)
+					if (terrain < 0) {
+						// 洞穴/水下區域
+						hillshade = 0.15
+					} else {
+						// 計算該格的 hillshade（使用 cubiomes-viewer 的簡化算法）
+						const hE = tile.array[x + 2]?.[z + 1]?.surface ?? tile.array[x + 1][z + 1].surface
+						const hW = tile.array[x]?.[z + 1]?.surface ?? tile.array[x + 1][z + 1].surface
+						const hS = tile.array[x + 1]?.[z + 2]?.surface ?? tile.array[x + 1][z + 1].surface
+						const hN = tile.array[x + 1]?.[z]?.surface ?? tile.array[x + 1][z + 1].surface
+						// tile.step is in quart units; convert to block scale for cubiomes lighting.
+						const hillshadeScale = tile.step * 4
+
+						hillshade = calculateHillshadeSimple(hN, hS, hE, hW, hillshadeScale, true)
+					}
+
+					// 套用 hillshade 到顏色
+					biomeColor = {
+						r: Math.round(biomeColor.r * hillshade),
+						g: Math.round(biomeColor.g * hillshade),
+						b: Math.round(biomeColor.b * hillshade)
 					}
 				}
 
+				smallCtx.fillStyle = `rgb(${biomeColor.r}, ${biomeColor.g}, ${biomeColor.b})`
+				smallCtx.fillRect(x, z, 1, 1)
+			}
+		}
+
+		// 用平滑縮放繪製到主 canvas（抗鋸齒效果）
+		tile.ctx.imageSmoothingEnabled = true
+		tile.ctx.imageSmoothingQuality = 'high'
+		tile.ctx.drawImage(smallCanvas, 0, 0, gridSize, gridSize, 0, 0, this.tileSize, this.tileSize)
+
+		// === 第三階段：海平面波浪效果 ===
+		if (show_sealevel && project_down) {
+			for (let x = 0; x < gridSize; x++) {
+				for (let z = 0; z < gridSize; z++) {
+					const y = Math.min(tile.array[x + 1][z + 1].surface, this.y.value)
+					const belowSurface = y < tile.array[x + 1][z + 1].surface
+					if (!belowSurface && y < this.loadedDimensionStore.noise_generator_settings.seaLevel - 2) {
+						tile.ctx.drawImage(waveImage, (x * pixelSize) % 16, (z * pixelSize) % 16, 4, 4, x * pixelSize, z * pixelSize, 4, 4)
+					}
+				}
+			}
+		}
+
+		// === 第四階段：等高線渲染 ===
+		if (contourInterval > 0 && project_down) {
+			tile.ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)'
+			tile.ctx.lineWidth = 1
+
+			for (let x = 0; x < gridSize; x++) {
+				for (let z = 0; z < gridSize; z++) {
+					const h1 = tile.array[x + 1][z + 1].surface
+					const h2 = tile.array[x + 2][z + 1].surface  // 右邊
+					const h3 = tile.array[x + 1][z + 2].surface  // 下方
+
+					const level1 = Math.floor(h1 / contourInterval)
+					const level2 = Math.floor(h2 / contourInterval)
+					const level3 = Math.floor(h3 / contourInterval)
+
+					const px = x * pixelSize
+					const pz = z * pixelSize
+
+					// 繪製垂直邊界（與右邊像素比較）
+					if (level1 !== level2) {
+						tile.ctx.beginPath()
+						tile.ctx.moveTo(px + pixelSize, pz)
+						tile.ctx.lineTo(px + pixelSize, pz + pixelSize)
+						tile.ctx.stroke()
+					}
+
+					// 繪製水平邊界（與下方像素比較）
+					if (level1 !== level3) {
+						tile.ctx.beginPath()
+						tile.ctx.moveTo(px, pz + pixelSize)
+						tile.ctx.lineTo(px + pixelSize, pz + pixelSize)
+						tile.ctx.stroke()
+					}
+				}
 			}
 		}
 

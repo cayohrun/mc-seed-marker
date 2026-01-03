@@ -9,6 +9,7 @@ import { getCustomDensityFunction, hashCode } from "../util.js";
 import { useDatapackStore } from "./useDatapackStore.js";
 import { useSettingsStore } from "./useSettingsStore.js";
 import { useStructureNotesStore, DEFAULT_STRUCTURE_ICONS } from "./useStructureNotesStore.js";
+import { getSoftBiomeColor } from "../config/biomeColors.js";
 
 import messages from '@intlify/unplugin-vue-i18n/messages'
 
@@ -254,6 +255,13 @@ export const useLoadedDimensionStore = defineStore('loaded_dimension', () => {
     }
 
     function getBiomeColor(id: string){
+        // 優先使用柔和調色盤
+        const softColor = getSoftBiomeColor(id)
+        if (softColor !== undefined) {
+            return softColor
+        }
+
+        // 回退到 datapack 定義的顏色
         var biomeColor = biome_colors.get(id)
         if (biomeColor === undefined) {
             const hash = hashCode(id)
