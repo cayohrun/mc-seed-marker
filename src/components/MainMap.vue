@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import "leaflet/dist/leaflet.css";
 import L, { control } from "leaflet";
-import { BiomeLayer } from "../MapLayers/BiomeLayer";
+import { McseedmapBiomeLayer } from "../MapLayers/McseedmapBiomeLayer";
 import { Graticule } from "../MapLayers/Graticule";
 import { onMounted, ref, watch, watchEffect } from 'vue';
 import BiomeTooltip from './BiomeTooltip.vue';
@@ -29,7 +29,7 @@ const markersStore = useMarkersStore()
 const structureNotesStore = useStructureNotesStore()
 const i18n = useI18n()
 
-let biomeLayer: BiomeLayer
+let biomeLayer: McseedmapBiomeLayer
 let graticule: Graticule
 
 const tooltip_left = ref(0)
@@ -90,13 +90,11 @@ onMounted(() => {
     })
     zoom.addTo(map)
 
-    biomeLayer = new BiomeLayer({
+    biomeLayer = new McseedmapBiomeLayer({
             tileSize: 256,
             minZoom: -100
         },
         do_hillshade,
-        show_sealevel,
-        project_down,
         y
     )
 

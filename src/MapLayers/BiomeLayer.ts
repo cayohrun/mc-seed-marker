@@ -166,7 +166,9 @@ export class BiomeLayer extends L.GridLayer {
 						// tile.step is in quart units; convert to block scale for cubiomes lighting.
 						const hillshadeScale = tile.step * 4
 
-						hillshade = calculateHillshadeSimple(hN, hS, hE, hW, hillshadeScale, true)
+						// Y 軸已被翻轉 (min.y *= -1)，所以 array 中 z 方向與視覺 N/S 相反
+						// 交換 hN 和 hS 以對齊視覺方向，使用 cubiomes 的原始公式
+						hillshade = calculateHillshadeSimple(hS, hN, hE, hW, hillshadeScale, false)
 					}
 
 					// 套用 hillshade 到顏色
