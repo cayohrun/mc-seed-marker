@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.0] - 2026-01-03
+
+### Added
+- 完全復刻 mcseedmap.net 生態系渲染效果
+- 引入 mcseedmap.net 原版 WASM 渲染引擎
+- Hillshade 地形陰影效果
+- 支援多版本 btree 資源 (MC 1.18 - 1.21.5)
+  - btree18.dat, btree19.dat, btree192.dat
+  - btree20.dat, btree21wd.dat, btree215.dat
+- McseedmapBiomeLayer：新的生態系渲染圖層
+
+### Changed
+- 生態系渲染從 deepslate MultiNoise 改為 mcseedmap WASM
+- 使用 Comlink 進行 Web Worker 通訊
+- 圖像解碼改用 createImageBitmap 處理 BMP 格式
+
+### Technical
+- 初始化順序：WASM → setColors → configure → setBiomeTree
+- 90 種生態系顏色（與 mcseedmap.net 完全一致）
+- 支援 hillshade 開關切換
+
 ## [1.1.0] - 2026-01-03
 
 ### Added
