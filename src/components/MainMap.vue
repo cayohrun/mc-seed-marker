@@ -3,17 +3,14 @@ import "leaflet/dist/leaflet.css";
 import L, { control } from "leaflet";
 import { McseedmapBiomeLayer } from "../MapLayers/McseedmapBiomeLayer";
 import { Graticule } from "../MapLayers/Graticule";
-import { onMounted, ref, watch, watchEffect } from 'vue';
-import BiomeTooltip from './BiomeTooltip.vue';
+import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue';
 import { BlockPos, Chunk, ChunkPos, DensityFunction, Identifier, RandomState, Structure, StructurePlacement, StructureSet, WorldgenStructure } from 'deepslate';
-import YSlider from './YSlider.vue';
 import { useSearchStore } from '../stores/useBiomeSearchStore';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { useLoadedDimensionStore } from '../stores/useLoadedDimensionStore'
 import { useMarkersStore, type Marker } from '../stores/useMarkersStore';
 import { useStructureNotesStore, AVAILABLE_STRUCTURE_ICONS } from '../stores/useStructureNotesStore';
 import { CachedBiomeSource } from '../util/CachedBiomeSource';
-import MapButton from './MapButton.vue';
 import { SpawnTarget } from '../util/SpawnTarget';
 import { useI18n } from 'vue-i18n';
 import { versionMetadata } from "../util";
@@ -46,6 +43,60 @@ const project_down = ref(true)
 const y = ref(320)
 
 const show_graticule = ref(false)
+
+// 縮放控制狀態
+const mapReady = ref(false)
+const currentZoom = ref(0)
+const minZoom = ref(-6)
+const maxZoom = ref(1)
+
+const canZoomIn = computed(() => mapReady.value && currentZoom.value < maxZoom.value)
+const canZoomOut = computed(() => mapReady.value && currentZoom.value > minZoom.value)
+const canReset = computed(() => mapReady.value)
+
+const onZoomEnd = () => { currentZoom.value = map.getZoom() }
+
+const handleZoomIn = () => { if (canZoomIn.value) map.zoomIn() }
+const handleZoomOut = () => { if (canZoomOut.value) map.zoomOut() }
+const handleResetView = () => { if (canReset.value) map.setView([0, 0], 0) }
+
+// tp 輸入 - 單一輸入框 "X Z" 格式
+const tpInput = ref('')
+
+const handleTeleport = () => {
+    if (!canReset.value) return
+    const parts = tpInput.value.trim().split(/[\s,]+/)
+    if (parts.length >= 2) {
+        const x = parseInt(parts[0])
+        const z = parseInt(parts[1])
+        if (!isNaN(x) && !isNaN(z)) {
+            const crs = map.options.crs!
+            const latLng = crs.unproject(new L.Point(x, -z))
+            map.setView(latLng, map.getZoom())
+        }
+    }
+}
+
+
+// 維度選項
+const dimensions = [
+    { id: 'minecraft:overworld', label: 'OVERWORLD', icon: 'grass', bgClass: 'peer-checked:bg-primary/20 peer-checked:border-primary' },
+    { id: 'minecraft:the_nether', label: 'NETHER', icon: 'local_fire_department', bgClass: 'peer-checked:bg-red-900/50 peer-checked:border-red-600' },
+    { id: 'minecraft:the_end', label: 'THE END', icon: 'visibility', bgClass: 'peer-checked:bg-purple-900/50 peer-checked:border-purple-500' },
+]
+
+const currentDimension = computed(() => settingsStore.dimension.toString())
+const setDimension = (id: string) => {
+    settingsStore.dimension = Identifier.parse(id)
+}
+
+// 當前游標位置座標（用於底部資訊列）
+const cursorX = ref(0)
+const cursorZ = ref(0)
+const cursorBiomeName = computed(() => {
+    const biome = tooltip_biome.value
+    return settingsStore.getLocalizedName('biome', biome, false)
+})
 
 watch(show_graticule, (value) => {
     if (value) {
@@ -125,6 +176,10 @@ onMounted(() => {
         tooltip_biome.value = biome
         tooltip_position.value = pos
         show_tooltip.value = true
+
+        // 更新底部資訊列座標
+        cursorX.value = pos[0]
+        cursorZ.value = pos[2]
     })
 
 
@@ -161,6 +216,13 @@ onMounted(() => {
 
     graticule = new Graticule()
 
+    // 縮放控制初始化
+    map.on('zoomend', onZoomEnd)
+    currentZoom.value = map.getZoom()
+    minZoom.value = map.getMinZoom()
+    maxZoom.value = map.getMaxZoom()
+    mapReady.value = true
+
     /*
     layer.on("tileunload", (evt) => {
         // @ts-expect-error: _tileCoordsToBounds does not exist
@@ -169,6 +231,11 @@ onMounted(() => {
     })*/
 
 });
+
+// 清理監聽
+onUnmounted(() => {
+    map?.off('zoomend', onZoomEnd)
+})
 
 watch(i18n.locale, () => {
     zoom.setPosition(i18n.t('locale.text_direction') === 'ltr' ? 'topright' : 'topleft')
@@ -527,21 +594,70 @@ watch(() => [settingsStore.seed, settingsStore.mc_version, settingsStore.dimensi
 </script>
   
 <template>
+    <div class="map-wrapper">
     <div id="map_container">
         <div id="map">
         </div>
-        <div class="map_options">
-            <Suspense>
-                <YSlider class="slider" v-model:y="y" />
-            </Suspense>
-            <MapButton icon="fa-arrows-down-to-line" :disabled="loadedDimensionStore.surface_density_function === undefined" v-model="project_down" :title="i18n.t('map.setting.project')" />
-            <MapButton icon="fa-mountain-sun" :disabled="(!project_down || loadedDimensionStore.surface_density_function === undefined) && ! loadedDimensionStore.terrain_density_function" v-model="do_hillshade"  :title="i18n.t('map.setting.hillshade')" />
-            <MapButton icon="fa-water" :disabled="loadedDimensionStore.surface_density_function === undefined" v-model="show_sealevel" :title="i18n.t('map.setting.sealevel')" />
-            <MapButton icon="fa-table-cells" v-model="show_graticule" :title="i18n.t('map.setting.graticule')" />
+    </div>
+
+    <!-- 維度標籤頁 -->
+    <div class="absolute top-6 left-1/2 -translate-x-1/2 z-[1000]">
+        <div class="glass-panel p-1 flex gap-1">
+            <label v-for="dim in dimensions" :key="dim.id" class="cursor-pointer">
+                <input
+                    type="radio"
+                    name="dimension"
+                    :checked="currentDimension === dim.id"
+                    @change="setDimension(dim.id)"
+                    class="peer sr-only"
+                />
+                <div :class="[
+                    'px-4 py-2 border-2 border-transparent text-text-secondary hover:text-white transition-none flex items-center gap-2',
+                    dim.bgClass
+                ]">
+                    <span class="material-symbols-outlined text-xl">{{ dim.icon }}</span>
+                    <span class="font-pixel text-lg pt-1">{{ dim.label }}</span>
+                </div>
+            </label>
         </div>
     </div>
-    <BiomeTooltip id="tooltip" v-if="show_tooltip" :style="{ left: tooltip_left + 'px', top: tooltip_top + 'px' }"
-        :biome="tooltip_biome" :pos="tooltip_position" />
+
+    <!-- TP 輸入框 - 右上角 -->
+    <div class="absolute top-6 right-6 z-[1000]">
+        <div class="glass-panel flex items-center h-12 px-3 bg-black/80 border-2 border-gray-600">
+            <span class="text-text-secondary font-pixel text-lg mr-2">> tp</span>
+            <input
+                v-model="tpInput"
+                @keyup.enter="handleTeleport"
+                class="bg-transparent border-none text-primary font-pixel text-xl focus:ring-0 focus:outline-none placeholder:text-gray-700 w-32 focus:w-48 transition-all pt-1"
+                placeholder="X Z"
+            />
+            <button @click="handleTeleport" class="text-white hover:text-primary ml-1">
+                <span class="material-symbols-outlined">subdirectory_arrow_left</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 座標資訊列 - 跟隨滑鼠游標 -->
+    <div class="absolute bottom-6 left-6 z-[1000]">
+        <div class="bg-status-bg border border-white/5 rounded-[12px] shadow-lg flex items-center px-6 py-3 gap-6">
+            <div class="text-gray-400 font-pixel text-xl tracking-wide flex items-center gap-2">
+                <span>COORDINATES</span>
+                <span class="text-status-blue">X: {{ cursorX }}</span>,
+                <span class="text-status-blue">Z: {{ cursorZ }}</span>,
+                <span class="text-status-blue">Y: {{ Math.round(tooltip_position[1]) }}</span>
+            </div>
+            <div class="w-px h-6 bg-white/10"></div>
+            <div class="text-gray-400 font-pixel text-xl tracking-wide flex items-center gap-3">
+                <span>BIOME</span>
+                <div class="flex items-center gap-2 text-white">
+                    <span class="w-2 h-2 rounded-full bg-status-green shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+                    <span class="biome-name-cjk">{{ cursorBiomeName }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="top">
         <Transition>
             <div class="info zoom" v-if="needs_zoom">
@@ -559,13 +675,56 @@ watch(() => [settingsStore.seed, settingsStore.mc_version, settingsStore.dimensi
             {{ i18n.t('map.info.teleport_command_copied') }}
         </div>
     </Transition>
+
+    <!-- 控制面板：縮放按鈕組 + Reset View -->
+    <div class="absolute bottom-6 right-6 z-[500] flex flex-col gap-3">
+        <!-- 縮放按鈕組 -->
+        <div class="glass-panel p-1 flex flex-col gap-1 bg-surface-dark/90">
+            <button
+                @click="handleZoomIn"
+                :disabled="!canZoomIn"
+                class="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 border border-transparent hover:border-white/20"
+                :class="{ 'opacity-50 cursor-not-allowed': !canZoomIn }"
+            >
+                <span class="material-symbols-outlined text-2xl">add</span>
+            </button>
+            <div class="h-0.5 bg-white/10 w-full"></div>
+            <button
+                @click="handleZoomOut"
+                :disabled="!canZoomOut"
+                class="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 border border-transparent hover:border-white/20"
+                :class="{ 'opacity-50 cursor-not-allowed': !canZoomOut }"
+            >
+                <span class="material-symbols-outlined text-2xl">remove</span>
+            </button>
+        </div>
+        <!-- Reset View 獨立按鈕 -->
+        <button
+            @click="handleResetView"
+            :disabled="!canReset"
+            class="glass-panel w-12 h-12 flex items-center justify-center text-white hover:bg-white/10 group"
+            :class="{ 'opacity-50 cursor-not-allowed': !canReset }"
+        >
+            <span class="material-symbols-outlined text-3xl text-red-500 group-hover:animate-pulse">explore</span>
+        </button>
+    </div>
+    </div>
 </template>
 
 <style scoped>
-#map_container {
+.map-wrapper {
     width: 100%;
+    height: 100%;
     flex-grow: 1;
     position: relative;
+}
+
+#map_container {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
 }
 
 #map {
@@ -580,27 +739,7 @@ watch(() => [settingsStore.seed, settingsStore.mc_version, settingsStore.dimensi
     cursor: grab;
 }
 
-.map_options {
-    position: absolute;
-    z-index: 600;
-    top: 5rem;
-    right: 0.85rem;
-    display: flex;
-    flex-direction: column;
-    align-items: end;
-    gap: 0.5rem;
-}
 
-.map_options:dir(rtl) {
-    right: unset;
-    left: 0.85rem;
-}
-
-#tooltip {
-    position: absolute;
-    pointer-events: none;
-    z-index: 500;
-}
 
 
 .top{

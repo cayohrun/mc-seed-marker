@@ -1,18 +1,13 @@
 <script setup lang="ts">
-import { onBeforeMount, ref } from 'vue';
-import Collapsable from './components/Collapsable.vue';
+import { ref, onBeforeMount } from 'vue';
+import Header from './components/Header.vue';
 import MainMap from './components/MainMap.vue';
 import Sidebar from './components/Sidebar.vue';
 import { useLoadedDimensionStore } from './stores/useLoadedDimensionStore';
-import { useUiStore } from './stores/useUiStore';
 import { useSearchStore } from './stores/useBiomeSearchStore';
-import Popup from './components/Popup.vue';
-import ModrinthMenu from './components/modrinth/ModrinthMenu.vue';
 import { WorldgenStructure } from 'deepslate';
 
 const loaded = ref(false)
-
-const uiStore = useUiStore()
 const searchStore = useSearchStore()
 
 const mainMapRef = ref<InstanceType<typeof MainMap> | null>(null)
@@ -34,38 +29,24 @@ onBeforeMount(async () => {
   }
 
   loaded.value = true
-
 })
-
 </script>
 
 <template>
-  <div class="layout" v-if="loaded">
-    <Collapsable>
-      <Sidebar ref="sidebarRef" @goto="handleGoto" />
-    </Collapsable>
-    <MainMap ref="mainMapRef" />
+  <div class="flex flex-col h-screen bg-background-dark" v-if="loaded">
+    <Header />
+    <div class="flex flex-1 min-h-0 overflow-hidden">
+      <!-- Sidebar 固定顯示 w-80 -->
+      <Sidebar ref="sidebarRef" class="w-80 shrink-0 h-full" @goto="handleGoto" />
+      <!-- Map 佔剩餘空間 -->
+      <MainMap ref="mainMapRef" class="flex-1 min-h-0" />
+    </div>
   </div>
-  <div class="layout loading" v-else>
-    <p>Loading...</p>
+  <div class="flex items-center justify-center h-screen bg-background-dark" v-else>
+    <p class="text-5xl text-white font-pixel">Loading...</p>
   </div>
 </template>
 
 <style scoped>
-.layout {
-  width: 100%;
-  height: 100%;
-  display: flex;
-}
-
-.loading{
-  font-size: 5rem;
-  color: white;
-  align-items: center;
-  justify-content: center;
-}
-
-p{
-  height: fit-content;
-}
+/* 桌面版固定佈局，不做 RWD */
 </style>
