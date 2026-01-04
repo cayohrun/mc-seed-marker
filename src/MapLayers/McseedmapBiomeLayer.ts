@@ -35,6 +35,12 @@ function parseVersion(versionStr: string): { major: number; minor: number; patch
 
 const DEFAULT_MAX_BIOME_ID = 255
 
+// Worker pool size calculation (safe for SSR/Node environments)
+function getWorkerPoolSize(): number {
+	if (typeof navigator === 'undefined') return 4  // SSR/Node fallback
+	return Math.max(1, Math.min(16, (navigator.hardwareConcurrency || 4) - 1))
+}
+
 // mcseedmap.net biome colors (decimal format)
 const BIOME_COLORS: number[] = [
 	// Index 0-127: Overworld biomes (order matches mcseedmap internal biome IDs)
@@ -169,6 +175,25 @@ interface SeedmapGenerator {
 	): Promise<ArrayBuffer>
 }
 
+// Worker instance in the pool
+interface WorkerInstance {
+	worker: Worker
+	generator: Comlink.Remote<SeedmapGenerator>
+	busy: boolean
+	ready: boolean
+	index: number  // Worker index for rebuilding
+	currentTask: TileTask | null  // Currently executing task
+}
+
+// Tile generation task
+interface TileTask {
+	key: string
+	coords: L.Coords
+	requestId: number
+	resolve: (buffer: ArrayBuffer | null) => void
+	done: L.DoneCallback  // Captured from createTile, belongs to this specific task
+}
+
 // btree file mapping for different MC versions
 function getBtreeFile(major: number, minor: number, patch: number): string {
 	if (minor === 18) return 'btree18.dat'
@@ -188,20 +213,51 @@ type Tile = {
 	canvas: HTMLCanvasElement,
 	ctx: CanvasRenderingContext2D,
 	done: L.DoneCallback,
-	pending: boolean
+	pending: boolean,
+	requestId: number  // For task cancellation
 }
 
 /**
  * BiomeLayer using mcseedmap.net's original WASM for pixel-perfect rendering
+ * with multi-worker parallel processing for improved performance
  */
 export class McseedmapBiomeLayer extends L.GridLayer {
 	private Tiles: { [key: string]: Tile } = {}
 	private tileSize = 256
 	private settingsStore = useSettingsStore()
-	private generator: Comlink.Remote<SeedmapGenerator> | null = null
-	private worker: Worker | null = null
-	private isReady = false
-	private pendingTasks: Array<{ key: string; coords: L.Coords }> = []
+
+	// Worker pool
+	private workers: WorkerInstance[] = []
+	private isPoolReady = false
+	private initPromise: Promise<void> | null = null
+	private initFailed = false
+	private workerPoolSize: number
+
+	// Task management
+	private taskQueue: TileTask[] = []
+	private currentRequestId = 0
+
+	// Cached resources (shared across all workers)
+	private btreeCache: Map<string, Uint8Array> = new Map()
+	private currentBtreeUrl: string | null = null
+	private btreeLoadId = 0  // Version lock for btree loading
+
+	// Pending updates during initialization
+	private pendingConfigUpdate = false
+	private pendingBtreeUpdate = false
+
+	// Update barrier: blocks task processing during config updates
+	private isUpdating = false
+
+	// Config update version lock (prevents stale updates from overwriting)
+	private configUpdateId = 0
+
+	// Disposed flag: prevents operations after layer removal
+	private isDisposed = false
+
+	// URLs for worker initialization
+	private workerUrl: URL
+	private wasmUrl: URL
 
 	constructor(
 		options: L.GridLayerOptions,
@@ -210,158 +266,369 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 	) {
 		super(options)
 		this.tileSize = options.tileSize as number
+		this.workerPoolSize = getWorkerPoolSize()
 
-		this.initWorker()
+		// Pre-compute URLs
+		this.workerUrl = new URL('../mcseedmap/mcseedmap-worker.js', import.meta.url)
+		this.wasmUrl = new URL('../mcseedmap/mcseedmap.wasm', import.meta.url)
+
+		this.initPromise = this.initWorkerPool()
 
 		// Watch for hillshade toggle
 		watch(do_hillshade, () => {
-			this.redraw()
+			this.invalidateAndRedraw()
 		})
 
 		// Watch for Y level changes
 		watch(y, () => {
-			this.redraw()
+			this.invalidateAndRedraw()
 		})
 
 		// Watch for seed changes
+		// Must wait for worker update before redraw
 		watch(() => this.settingsStore.seed, () => {
-			this.updateGenerator()
-			this.redraw()
+			this.updateConfigThenRedraw().catch(this.logError)
 		})
 
 		// Watch for version changes (need to reload btree for different versions)
-		watch(() => this.settingsStore.mc_version, async () => {
-			await this.updateGenerator()  // Configure first (may recreate generator)
-			await this.loadBtree()        // Then load btree into new generator
-			this.redraw()
+		watch(() => this.settingsStore.mc_version, () => {
+			this.updateConfigAndBtreeThenRedraw().catch(this.logError)
 		})
 
 		// Watch for dimension changes
 		watch(() => this.settingsStore.dimension, () => {
-			this.updateGenerator()
-			this.redraw()
+			this.updateConfigThenRedraw().catch(this.logError)
 		})
 	}
 
-	private async initWorker() {
+	/**
+	 * Error handler for async operations
+	 */
+	private logError = (error: unknown) => {
+		console.error('[McseedmapBiomeLayer] Async error:', error)
+	}
+
+	/**
+	 * Update config then redraw (with barrier and version lock)
+	 */
+	private async updateConfigThenRedraw() {
+		if (this.isDisposed) return
+
+		// Version lock: get current update ID
+		const updateId = ++this.configUpdateId
+
+		// Set barrier to pause task processing
+		this.isUpdating = true
+
 		try {
-			// Create worker from mcseedmap's original worker.js
-			// Note: worker.js is an IIFE, not ES module
-			const workerUrl = new URL('../mcseedmap/mcseedmap-worker.js', import.meta.url)
-			console.log('[McseedmapBiomeLayer] Worker URL:', workerUrl.href)
-			this.worker = new Worker(workerUrl, { type: 'classic' })
+			if (!this.isPoolReady) {
+				this.pendingConfigUpdate = true
+			} else {
+				await this.updateAllGenerators()
+			}
+		} finally {
+			this.isUpdating = false
+		}
 
-			// Wrap with Comlink
-			this.generator = Comlink.wrap<SeedmapGenerator>(this.worker)
+		// Check if this update is still valid (no newer update started)
+		if (this.isDisposed || updateId !== this.configUpdateId) return
 
-			// Initialize WASM
-			const wasmUrl = new URL('../mcseedmap/mcseedmap.wasm', import.meta.url)
-			console.log('[McseedmapBiomeLayer] WASM URL:', wasmUrl.href)
-			await this.generator.initialize(wasmUrl.href)
-			console.log('[McseedmapBiomeLayer] WASM loaded')
+		// Now redraw with updated config
+		this.invalidateAndRedraw()
+	}
 
-			// Set biome colors (must be before configure)
-			await this.generator.setColors(BIOME_COLORS)
-			console.log('[McseedmapBiomeLayer] Colors set')
+	/**
+	 * Update config and btree then redraw (with barrier and version lock)
+	 */
+	private async updateConfigAndBtreeThenRedraw() {
+		if (this.isDisposed) return
 
-			// Configure generator first (creates the SmGenerator instance)
-			await this.updateGenerator()
-			console.log('[McseedmapBiomeLayer] Generator configured')
+		// Version lock: get current update ID
+		const updateId = ++this.configUpdateId
 
-			// Load btree resource AFTER generator is created
-			await this.loadBtree()
-			console.log('[McseedmapBiomeLayer] Btree loaded')
+		// Set barrier to pause task processing
+		this.isUpdating = true
 
-			this.isReady = true
-			console.log('[McseedmapBiomeLayer] Worker initialized')
+		try {
+			if (!this.isPoolReady) {
+				this.pendingConfigUpdate = true
+				this.pendingBtreeUpdate = true
+			} else {
+				await this.updateAllGenerators()
+				await this.loadAndDistributeBtree()
+			}
+		} finally {
+			this.isUpdating = false
+		}
 
-			// Process pending tasks
-			this.processPendingTasks()
+		// Check if this update is still valid (no newer update started)
+		if (this.isDisposed || updateId !== this.configUpdateId) return
+
+		// Now redraw with updated config
+		this.invalidateAndRedraw()
+	}
+
+	/**
+	 * Initialize the worker pool with multiple workers
+	 */
+	private async initWorkerPool() {
+		console.log(`[McseedmapBiomeLayer] Initializing worker pool with ${this.workerPoolSize} workers`)
+
+		try {
+			// Create all workers in parallel
+			const initPromises = Array.from({ length: this.workerPoolSize }, (_, i) =>
+				this.createWorkerInstance(i)
+			)
+
+			const results = await Promise.allSettled(initPromises)
+
+			// Check if disposed during init
+			if (this.isDisposed) {
+				// Terminate any workers that were created
+				for (const result of results) {
+					if (result.status === 'fulfilled' && result.value) {
+						result.value.worker.terminate()
+					}
+				}
+				return
+			}
+
+			// Add successfully created workers to pool
+			for (const result of results) {
+				if (result.status === 'fulfilled' && result.value) {
+					this.workers.push(result.value)
+				}
+			}
+
+			if (this.workers.length === 0) {
+				throw new Error('No workers could be initialized')
+			}
+
+			console.log(`[McseedmapBiomeLayer] Worker pool ready: ${this.workers.length}/${this.workerPoolSize} workers`)
+
+			// Check disposed again before continuing
+			if (this.isDisposed) {
+				this.terminateAllWorkers()
+				return
+			}
+
+			// Load btree into all workers
+			await this.loadAndDistributeBtree()
+
+			// Check disposed after btree load
+			if (this.isDisposed) {
+				this.terminateAllWorkers()
+				return
+			}
+
+			this.isPoolReady = true
+
+			// Apply any pending updates that occurred during initialization
+			if (this.pendingConfigUpdate) {
+				this.pendingConfigUpdate = false
+				await this.updateAllGenerators()
+			}
+			if (this.pendingBtreeUpdate) {
+				this.pendingBtreeUpdate = false
+				await this.loadAndDistributeBtree()
+			}
+
+			// Final disposed check
+			if (this.isDisposed) {
+				this.terminateAllWorkers()
+				return
+			}
+
+			// Process any queued tasks
+			this.processTaskQueue()
+
 		} catch (error) {
-			console.error('[McseedmapBiomeLayer] Failed to init worker:', error)
+			console.error('[McseedmapBiomeLayer] Failed to init worker pool:', error)
+			this.initFailed = true
+			// Fail all queued tasks so tiles don't hang
+			this.failAllQueuedTasks()
 		}
 	}
 
-	private async updateGenerator() {
-		if (!this.generator) return
+	/**
+	 * Fail all queued tasks (called when initialization fails)
+	 */
+	private failAllQueuedTasks() {
+		while (this.taskQueue.length > 0) {
+			const task = this.taskQueue.shift()!
+			this.finishTask(task)
+		}
+	}
 
+	/**
+	 * Create and initialize a single worker instance
+	 */
+	private async createWorkerInstance(index: number): Promise<WorkerInstance> {
+		const worker = new Worker(this.workerUrl, { type: 'classic' })
+		const generator = Comlink.wrap<SeedmapGenerator>(worker)
+
+		// Initialize WASM
+		await generator.initialize(this.wasmUrl.href)
+
+		// Set biome colors
+		await generator.setColors(BIOME_COLORS)
+
+		// Configure generator
+		await this.configureGenerator(generator)
+
+		console.log(`[McseedmapBiomeLayer] Worker ${index} initialized`)
+
+		return {
+			worker,
+			generator,
+			busy: false,
+			ready: true,
+			index,
+			currentTask: null
+		}
+	}
+
+	/**
+	 * Configure a single generator with current settings
+	 */
+	private async configureGenerator(generator: Comlink.Remote<SeedmapGenerator>) {
 		const version = parseVersion(this.settingsStore.mc_version)
 		const dimension = DIMENSION_MAP[this.settingsStore.dimension.toString()] ?? 0
 		const largeBiomes = this.settingsStore.world_preset.toString() === 'minecraft:large_biomes'
 
-		console.log('[McseedmapBiomeLayer] Configuring:', {
-			seed: this.settingsStore.seed.toString(),
-			version,
+		await generator.configure(
+			this.settingsStore.seed,
+			256,  // tileSize for WASM
+			0,    // library: 0 = Java
+			version.major,
+			version.minor,
+			version.patch,
 			dimension,
 			largeBiomes
-		})
-
-		try {
-			await this.generator.configure(
-				this.settingsStore.seed,
-				256,  // tileSize for WASM (與 Leaflet tileSize 對齊，避免放大導致線條變粗)
-				0,   // library: 0 = Java
-				version.major,
-				version.minor,
-				version.patch,
-				dimension,
-				largeBiomes
-			)
-		} catch (error) {
-			console.error('[McseedmapBiomeLayer] Configure failed:', error)
-		}
+		)
 	}
 
-	private async loadBtree() {
-		if (!this.generator) return
+	/**
+	 * Update configuration for all workers
+	 */
+	private async updateAllGenerators() {
+		if (!this.isPoolReady) return
+
+		console.log('[McseedmapBiomeLayer] Updating all generators')
+
+		const updatePromises = this.workers.map(w => this.configureGenerator(w.generator))
+		await Promise.all(updatePromises)
+	}
+
+	/**
+	 * Load btree once and distribute to all workers
+	 * Uses version lock to prevent race conditions during rapid version changes
+	 */
+	private async loadAndDistributeBtree() {
+		if (this.workers.length === 0) return
 
 		const version = parseVersion(this.settingsStore.mc_version)
 		const btreeFile = getBtreeFile(version.major, version.minor, version.patch)
 		const btreeUrl = new URL(`../mcseedmap/btree/${btreeFile}`, import.meta.url).href
 
-		// Check if already loaded
-		const currentBtreeUrl = await this.generator.getBiomeTreeUrl()
-		if (currentBtreeUrl === btreeUrl) {
+		// Check cache first
+		if (this.currentBtreeUrl === btreeUrl) {
 			console.log('[McseedmapBiomeLayer] Btree already loaded:', btreeFile)
 			return
 		}
 
-		console.log('[McseedmapBiomeLayer] Loading btree:', btreeFile)
+		// Version lock: increment load ID to invalidate any in-flight requests
+		const loadId = ++this.btreeLoadId
+		console.log('[McseedmapBiomeLayer] Loading btree:', btreeFile, 'loadId:', loadId)
 
 		try {
-			const response = await fetch(btreeUrl)
-			if (!response.ok) {
-				throw new Error(`Failed to fetch btree: ${response.status}`)
+			// Fetch btree data (once)
+			let btreeData = this.btreeCache.get(btreeUrl)
+			if (!btreeData) {
+				const response = await fetch(btreeUrl)
+				if (!response.ok) {
+					throw new Error(`Failed to fetch btree: ${response.status}`)
+				}
+				const arrayBuffer = await response.arrayBuffer()
+				btreeData = new Uint8Array(arrayBuffer)
+				this.btreeCache.set(btreeUrl, btreeData)
+				console.log('[McseedmapBiomeLayer] Btree fetched, size:', btreeData.byteLength)
 			}
-			const arrayBuffer = await response.arrayBuffer()
-			const btreeData = new Uint8Array(arrayBuffer)
 
-			await this.generator.setBiomeTree(btreeData, btreeUrl)
-			console.log('[McseedmapBiomeLayer] Btree set, size:', btreeData.byteLength)
+			// Check if this load is still valid (no newer request started)
+			if (loadId !== this.btreeLoadId) {
+				console.log('[McseedmapBiomeLayer] Btree load cancelled (stale):', btreeFile)
+				return
+			}
+
+			// Distribute to all workers in parallel
+			const distributePromises = this.workers.map(w =>
+				w.generator.setBiomeTree(btreeData!, btreeUrl)
+			)
+			await Promise.all(distributePromises)
+
+			// Final check before committing
+			if (loadId !== this.btreeLoadId) {
+				console.log('[McseedmapBiomeLayer] Btree distribution cancelled (stale):', btreeFile)
+				return
+			}
+
+			this.currentBtreeUrl = btreeUrl
+			console.log('[McseedmapBiomeLayer] Btree distributed to all workers')
+
 		} catch (error) {
 			console.error('[McseedmapBiomeLayer] Failed to load btree:', error)
 		}
 	}
 
-	private processPendingTasks() {
-		while (this.pendingTasks.length > 0) {
-			const task = this.pendingTasks.shift()!
-			this.generateTile(task.key, task.coords)
+	/**
+	 * Get an idle worker from the pool
+	 */
+	private getIdleWorker(): WorkerInstance | null {
+		return this.workers.find(w => w.ready && !w.busy) || null
+	}
+
+	/**
+	 * Finish a task (resolve with null and call its done callback)
+	 * This uses the task's own done callback, not the current tile's
+	 */
+	private finishTask(task: TileTask) {
+		task.resolve(null)
+		task.done()
+	}
+
+	/**
+	 * Process tasks from the queue using available workers
+	 */
+	private processTaskQueue() {
+		// Don't process if update barrier is active
+		if (this.isUpdating) return
+
+		while (this.taskQueue.length > 0) {
+			const worker = this.getIdleWorker()
+			if (!worker) break
+
+			const task = this.taskQueue.shift()!
+			this.executeTask(worker, task)
 		}
 	}
 
-	private async generateTile(key: string, coords: L.Coords) {
-		if (!this.generator || !this.isReady) {
-			this.pendingTasks.push({ key, coords })
-			return
-		}
-
-		const tile = this.Tiles[key]
-		if (!tile) return
+	/**
+	 * Execute a tile generation task on a specific worker
+	 */
+	private async executeTask(worker: WorkerInstance, task: TileTask) {
+		worker.busy = true
+		worker.currentTask = task
 
 		try {
-			const renderSize = 64
-			const baseTileSize = 256  // 與 WASM tileSize 和 Leaflet tileSize 對齊
+			// Check if task is still valid (request not stale)
+			if (task.requestId !== this.currentRequestId) {
+				this.finishTask(task)
+				return
+			}
+
+			const coords = task.coords
+			const baseTileSize = 256
 			const tileSizeShift = Math.round(Math.log2(this.tileSize / baseTileSize))
 			const zoomOffset = coords.z - tileSizeShift
 			const tileBlockSize = zoomOffset < 0
@@ -371,9 +638,9 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 			const blockZ = coords.y * tileBlockSize
 
 			const shaderKind = this.do_hillshade.value ? ShaderKind.Simple : ShaderKind.None
-			const contourKind = shaderKind !== ShaderKind.None ? ContourKind.None : ContourKind.None
+			const contourKind = ContourKind.None
 
-			const buffer = await this.generator.generateBiomeImage(
+			const buffer = await worker.generator.generateBiomeImage(
 				zoomOffset,
 				blockX,
 				blockZ,
@@ -390,23 +657,107 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 				false // showSlime
 			)
 
+			// Check again if task is still valid after async operation
+			if (task.requestId === this.currentRequestId) {
+				task.resolve(buffer)
+			} else {
+				this.finishTask(task)
+			}
+
+		} catch (error) {
+			console.error('[McseedmapBiomeLayer] Task execution error:', error)
+			this.finishTask(task)
+		} finally {
+			worker.busy = false
+			worker.currentTask = null
+			this.processTaskQueue()
+		}
+	}
+
+	/**
+	 * Invalidate all pending tasks and redraw
+	 */
+	private invalidateAndRedraw() {
+		// Increment request ID to invalidate all pending tasks
+		this.currentRequestId++
+
+		// Finish all queued tasks (using their own done callbacks)
+		while (this.taskQueue.length > 0) {
+			const task = this.taskQueue.shift()!
+			this.finishTask(task)
+		}
+
+		// Redraw (workers keep running, stale results will be discarded via requestId check)
+		this.redraw()
+	}
+
+	/**
+	 * Queue a tile generation task
+	 */
+	private queueTileTask(key: string, coords: L.Coords, requestId: number, done: L.DoneCallback): Promise<ArrayBuffer | null> {
+		return new Promise((resolve) => {
+			const task: TileTask = { key, coords, requestId, resolve, done }
+			this.taskQueue.push(task)
+
+			// Try to process immediately if pool is ready
+			if (this.isPoolReady) {
+				this.processTaskQueue()
+			}
+		})
+	}
+
+	/**
+	 * Generate a tile (main entry point)
+	 */
+	private async generateTile(key: string, coords: L.Coords, done: L.DoneCallback) {
+		// Wait for pool to be ready
+		if (this.initPromise) {
+			await this.initPromise
+		}
+
+		const tile = this.Tiles[key]
+		if (!tile) return
+
+		// If initialization failed, mark tile as done immediately
+		if (this.initFailed) {
+			done()
+			return
+		}
+
+		const requestId = tile.requestId
+
+		// Queue task with this tile's done callback
+		// If task is cancelled, finishTask() will call done()
+		// If task succeeds, we get buffer and call done() here
+		const buffer = await this.queueTileTask(key, coords, requestId, done)
+
+		// If buffer is null, task was cancelled - finishTask already called done()
+		if (!buffer) return
+
+		try {
+			// Check if tile still exists and matches our request
+			const currentTile = this.Tiles[key]
+			if (!currentTile || currentTile.requestId !== requestId) {
+				// Tile was replaced - don't render, but still need to call our done
+				done()
+				return
+			}
+
 			// The WASM returns a BMP image (54-byte header + pixel data)
-			// Use createImageBitmap to decode it
 			const blob = new Blob([buffer], { type: 'image/bmp' })
 			const imageBitmap = await createImageBitmap(blob)
 
 			// Draw to tile canvas with nearest-neighbor scaling (no smoothing!)
-			tile.ctx.imageSmoothingEnabled = false
-			tile.ctx.clearRect(0, 0, this.tileSize, this.tileSize)
-			tile.ctx.drawImage(imageBitmap, 0, 0, this.tileSize, this.tileSize)
+			currentTile.ctx.imageSmoothingEnabled = false
+			currentTile.ctx.clearRect(0, 0, this.tileSize, this.tileSize)
+			currentTile.ctx.drawImage(imageBitmap, 0, 0, this.tileSize, this.tileSize)
 			imageBitmap.close()
 
-			tile.done()
-			tile.pending = false
+			// Success - call done for this tile
+			done()
 		} catch (error) {
-			console.error('[McseedmapBiomeLayer] Error generating tile:', error)
-			tile.done()
-			tile.pending = false
+			console.error('[McseedmapBiomeLayer] Error rendering tile:', error)
+			done()
 		}
 	}
 
@@ -428,10 +779,11 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 			canvas: tile,
 			ctx,
 			done,
-			pending: true
+			pending: true,
+			requestId: this.currentRequestId
 		}
 
-		this.generateTile(key, coords)
+		this.generateTile(key, coords, done)
 
 		return tile
 	}
@@ -440,5 +792,43 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 		delete this.Tiles[key]
 		// @ts-expect-error: _removeTile does not exist
 		L.TileLayer.prototype._removeTile.call(this, key)
+	}
+
+	/**
+	 * Clean up workers when layer is removed from map
+	 */
+	onRemove(map: L.Map): this {
+		// Mark as disposed to stop any in-flight operations
+		this.isDisposed = true
+
+		// Terminate all workers to free resources
+		this.terminateAllWorkers()
+
+		// Call parent onRemove
+		// @ts-expect-error: onRemove exists on GridLayer
+		return L.GridLayer.prototype.onRemove.call(this, map)
+	}
+
+	/**
+	 * Terminate all workers and clean up resources
+	 */
+	private terminateAllWorkers() {
+		console.log(`[McseedmapBiomeLayer] Terminating ${this.workers.length} workers`)
+
+		// Finish all pending tasks first (using their own done callbacks)
+		while (this.taskQueue.length > 0) {
+			const task = this.taskQueue.shift()!
+			this.finishTask(task)
+		}
+
+		// Terminate each worker
+		for (const w of this.workers) {
+			w.ready = false
+			w.worker.terminate()
+		}
+
+		// Clear worker array
+		this.workers = []
+		this.isPoolReady = false
 	}
 }
