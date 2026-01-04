@@ -9,29 +9,11 @@ import { useSearchStore } from '../stores/useBiomeSearchStore';
 import { useLoadedDimensionStore } from '../stores/useLoadedDimensionStore';
 import { versionMetadata, parseSeed } from '../util';
 import Footer from './Footer.vue';
-import MarkersPanel from './MarkersPanel.vue';
 import OpenDropdown from './dropdown/OpenDropdown.vue';
 import { vOnClickOutside } from '@vueuse/components';
 import { EventTracker } from '../util/EventTracker';
 import { useI18n } from 'vue-i18n';
 
-const emit = defineEmits<{
-  (e: 'goto', x: number, z: number): void
-  (e: 'fill-coords', x: number, z: number): void
-  (e: 'open_popup'): void
-}>()
-
-const markersPanelRef = ref<InstanceType<typeof MarkersPanel> | null>(null)
-
-function handleGoto(x: number, z: number) {
-  emit('goto', x, z)
-}
-
-function fillMarkerCoords(x: number, z: number) {
-  markersPanelRef.value?.fillCoordinates(x, z)
-}
-
-defineExpose({ fillMarkerCoords })
 
 const i18n = useI18n()
 const datapackStore = useDatapackStore()
@@ -384,12 +366,6 @@ function dragOverHandler(ev: DragEvent) {
       <!-- 分隔線 -->
       <div class="h-0.5 bg-border-dark"></div>
 
-      <!-- Custom Markers -->
-      <MarkersPanel ref="markersPanelRef" @goto="handleGoto" />
-
-      <!-- 分隔線 -->
-      <div class="h-0.5 bg-border-dark"></div>
-
       <!-- Datapack -->
       <div class="space-y-3">
         <div class="flex items-center justify-between">
@@ -416,8 +392,19 @@ function dragOverHandler(ev: DragEvent) {
     </div>
 
     <!-- Footer -->
-    <div class="p-4 border-t-2 border-border-dark">
-      <Footer @open_popup="emit('open_popup')" />
+    <div class="p-4 border-t-2 border-border-dark space-y-3">
+      <!-- Dev Mode Toggle -->
+      <label class="flex items-center justify-between p-2 hover:bg-white/5 cursor-pointer group border border-transparent hover:border-white/10">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 flex items-center justify-center bg-[#6B7280] border-2 border-white/20 shadow-sm">
+            <span class="material-symbols-outlined text-white text-[18px]">code</span>
+          </div>
+          <span class="text-lg font-pixel pt-1">{{ i18n.t('settings.dev_mode.label') }}</span>
+        </div>
+        <input type="checkbox" v-model="settingsStore.dev_mode" class="w-5 h-5 rounded-none border-2 border-gray-500 bg-black accent-primary" />
+      </label>
+
+      <Footer />
     </div>
   </aside>
 </template>

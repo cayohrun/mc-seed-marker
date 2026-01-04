@@ -14,10 +14,13 @@ import { CachedBiomeSource } from '../util/CachedBiomeSource';
 import { SpawnTarget } from '../util/SpawnTarget';
 import { useI18n } from 'vue-i18n';
 import { versionMetadata } from "../util";
+import MarkersPanel from './MarkersPanel.vue';
 
 const emit = defineEmits<{
   (e: 'add-marker', x: number, z: number): void
 }>()
+
+const markersPanelRef = ref<InstanceType<typeof MarkersPanel> | null>(null)
 
 const searchStore = useSearchStore()
 const settingsStore = useSettingsStore()
@@ -58,7 +61,12 @@ const onZoomEnd = () => { currentZoom.value = map.getZoom() }
 
 const handleZoomIn = () => { if (canZoomIn.value) map.zoomIn() }
 const handleZoomOut = () => { if (canZoomOut.value) map.zoomOut() }
-const handleResetView = () => { if (canReset.value) map.setView([0, 0], 0) }
+const handleResetView = () => {
+    if (!canReset.value) return
+    const crs = map.options.crs!
+    const latLng = crs.unproject(new L.Point(spawnX.value, -spawnZ.value))
+    map.setView(latLng, 0)
+}
 
 // tp 輸入 - 單一輸入框 "X Z" 格式
 const tpInput = ref('')
@@ -93,6 +101,10 @@ const setDimension = (id: string) => {
 // 當前游標位置座標（用於底部資訊列）
 const cursorX = ref(0)
 const cursorZ = ref(0)
+
+// 出生點座標
+const spawnX = ref(0)
+const spawnZ = ref(0)
 const cursorBiomeName = computed(() => {
     const biome = tooltip_biome.value
     return settingsStore.getLocalizedName('biome', biome, false)
@@ -541,9 +553,12 @@ function updateSpawnMarker(){
         const crs = map.options.crs!
         const spawnTarget = SpawnTarget.fromJson(loadedDimensionStore.loaded_dimension.noise_settings_json?.spawn_target, versionMetadata[settingsStore.mc_version].spawnAlgorithm)
         const spawn = spawnTarget.getSpawnPoint(loadedDimensionStore.sampler)
-        const pos = new L.Point(spawn[0] + 7, - spawn[1] - 7)
+        // 保存出生點座標
+        spawnX.value = spawn[0] + 7
+        spawnZ.value = spawn[1] + 7
+        const pos = new L.Point(spawnX.value, -spawnZ.value)
         spawnMarker.setLatLng(crs.unproject(pos))
-        spawnMarker.bindPopup(L.popup().setContent(() => `${i18n.t("map.tooltip.spawn")}<br />${i18n.t("map.coords.xz", {x: spawn[0] + 7, z: spawn[1] + 7})}`))
+        spawnMarker.bindPopup(L.popup().setContent(() => `${i18n.t("map.tooltip.spawn")}<br />${i18n.t("map.coords.xz", {x: spawnX.value, z: spawnZ.value})}`))
         spawnMarker.addTo(map)
     } else {
         spawnMarker.removeFrom(map)
@@ -600,28 +615,6 @@ watch(() => [settingsStore.seed, settingsStore.mc_version, settingsStore.dimensi
         </div>
     </div>
 
-    <!-- 維度標籤頁 -->
-    <div class="absolute top-6 left-1/2 -translate-x-1/2 z-[1000]">
-        <div class="glass-panel p-1 flex gap-1">
-            <label v-for="dim in dimensions" :key="dim.id" class="cursor-pointer">
-                <input
-                    type="radio"
-                    name="dimension"
-                    :checked="currentDimension === dim.id"
-                    @change="setDimension(dim.id)"
-                    class="peer sr-only"
-                />
-                <div :class="[
-                    'px-4 py-2 border-2 border-transparent text-text-secondary hover:text-white transition-none flex items-center gap-2',
-                    dim.bgClass
-                ]">
-                    <span class="material-symbols-outlined text-xl">{{ dim.icon }}</span>
-                    <span class="font-pixel text-lg pt-1">{{ dim.label }}</span>
-                </div>
-            </label>
-        </div>
-    </div>
-
     <!-- TP 輸入框 - 右上角 -->
     <div class="absolute top-6 right-6 z-[1000]">
         <div class="glass-panel flex items-center h-12 px-3 bg-black/80 border-2 border-gray-600">
@@ -675,6 +668,11 @@ watch(() => [settingsStore.seed, settingsStore.mc_version, settingsStore.dimensi
             {{ i18n.t('map.info.teleport_command_copied') }}
         </div>
     </Transition>
+
+    <!-- 自訂標記面板 - TP 下方 -->
+    <div class="absolute right-6 top-20 z-[500]">
+        <MarkersPanel ref="markersPanelRef" @goto="gotoPosition" class="markers-panel-map" />
+    </div>
 
     <!-- 控制面板：縮放按鈕組 + Reset View -->
     <div class="absolute bottom-6 right-6 z-[500] flex flex-col gap-3">
@@ -747,7 +745,7 @@ watch(() => [settingsStore.seed, settingsStore.mc_version, settingsStore.dimensi
     z-index: 500;
     left: 50%;
     transform: translateX(-50%);
-    top: 0.5rem;
+    top: 5rem; /* 移到維度標籤下方 */
 }
 
 .bottom {

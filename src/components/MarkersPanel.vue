@@ -294,8 +294,9 @@ defineExpose({ fillCoordinates })
 
 <style scoped>
 .markers-panel {
-  background-color: rgba(255, 255, 255, 0.05);
-  border-radius: 0.5rem;
+  width: 220px;
+  background-color: rgba(0, 0, 0, 0.8);
+  border: 2px solid rgb(75, 85, 99);
   overflow: hidden;
 }
 
@@ -306,11 +307,13 @@ defineExpose({ fillCoordinates })
   padding: 0.75rem 1rem;
   cursor: pointer;
   user-select: none;
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.05);
+  font-family: var(--font-pixel, 'VT323', monospace);
+  font-size: 1.125rem;
 }
 
 .panel-header:hover {
-  background-color: rgba(255, 255, 255, 0.15);
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .marker-count {
@@ -442,7 +445,7 @@ defineExpose({ fillCoordinates })
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: 300px;
+  max-height: 200px;
   overflow-y: auto;
 }
 

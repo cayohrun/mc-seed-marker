@@ -10,13 +10,6 @@ import { WorldgenStructure } from 'deepslate';
 const loaded = ref(false)
 const searchStore = useSearchStore()
 
-const mainMapRef = ref<InstanceType<typeof MainMap> | null>(null)
-const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null)
-
-function handleGoto(x: number, z: number) {
-  mainMapRef.value?.gotoPosition(x, z)
-}
-
 onBeforeMount(async () => {
   const loadedDimensionStore = useLoadedDimensionStore()
   await loadedDimensionStore.reload()
@@ -37,9 +30,9 @@ onBeforeMount(async () => {
     <Header />
     <div class="flex flex-1 min-h-0 overflow-hidden">
       <!-- Sidebar 固定顯示 w-80 -->
-      <Sidebar ref="sidebarRef" class="w-80 shrink-0 h-full" @goto="handleGoto" />
+      <Sidebar class="w-80 shrink-0 h-full" />
       <!-- Map 佔剩餘空間 -->
-      <MainMap ref="mainMapRef" class="flex-1 min-h-0" />
+      <MainMap class="flex-1 min-h-0" />
     </div>
   </div>
   <div class="flex items-center justify-center h-screen bg-background-dark" v-else>

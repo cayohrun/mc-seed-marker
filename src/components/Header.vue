@@ -1,9 +1,36 @@
 <script setup lang="ts">
-// Header - 純展示用，不需要 sidebar toggle 邏輯
+import { computed } from 'vue'
+import { Identifier } from 'deepslate'
+import { useSettingsStore } from '../stores/useSettingsStore'
+import { useI18n } from 'vue-i18n'
+import { updateUrlParam } from '../util'
+import { EventTracker } from '../util/EventTracker'
+
+const settingsStore = useSettingsStore()
+const i18n = useI18n()
+
+function updateLocale(locale: string) {
+    i18n.locale.value = locale
+    updateUrlParam('lang', locale)
+    EventTracker.track(`change_locale/${locale}`)
+}
+
+// 維度選項
+const dimensions = [
+    { id: 'minecraft:overworld', label: 'OVERWORLD', icon: 'grass', bgClass: 'peer-checked:bg-primary/20 peer-checked:border-primary' },
+    { id: 'minecraft:the_nether', label: 'NETHER', icon: 'local_fire_department', bgClass: 'peer-checked:bg-red-900/50 peer-checked:border-red-600' },
+    { id: 'minecraft:the_end', label: 'THE END', icon: 'visibility', bgClass: 'peer-checked:bg-purple-900/50 peer-checked:border-purple-500' },
+]
+
+const currentDimension = computed(() => settingsStore.dimension.toString())
+const setDimension = (id: string) => {
+    settingsStore.dimension = Identifier.parse(id)
+}
 </script>
 
 <template>
     <header class="flex items-center justify-between border-b-2 border-border-dark bg-surface-dark px-6 py-3 h-16 z-20 shrink-0">
+        <!-- 左側：Logo + Nav -->
         <div class="flex items-center gap-8">
             <!-- Logo -->
             <div class="flex items-center gap-3 text-white">
@@ -13,7 +40,7 @@
                 <h1 class="text-2xl font-pixel tracking-wide text-white drop-shadow-md">MC Seed Map</h1>
             </div>
 
-            <!-- Navigation - 固定顯示 -->
+            <!-- Navigation -->
             <nav class="flex items-center gap-6">
                 <a class="text-white text-sm font-bold uppercase tracking-widest hover:text-primary transition-colors font-pixel text-lg" href="#">Map</a>
                 <a class="text-text-secondary text-sm font-bold uppercase tracking-widest hover:text-white transition-colors font-pixel text-lg" href="#">Seeds</a>
@@ -21,7 +48,44 @@
             </nav>
         </div>
 
+        <!-- 中間：維度選擇器 -->
+        <div class="absolute left-1/2 -translate-x-1/2">
+            <div class="glass-panel p-1 flex gap-1">
+                <label v-for="dim in dimensions" :key="dim.id" class="cursor-pointer">
+                    <input
+                        type="radio"
+                        name="dimension"
+                        :checked="currentDimension === dim.id"
+                        @change="setDimension(dim.id)"
+                        class="peer sr-only"
+                    />
+                    <div :class="[
+                        'px-4 py-1.5 border-2 border-transparent text-text-secondary hover:text-white transition-none flex items-center gap-2',
+                        dim.bgClass
+                    ]">
+                        <span class="material-symbols-outlined text-lg">{{ dim.icon }}</span>
+                        <span class="font-pixel text-base pt-0.5">{{ dim.label }}</span>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <!-- 右側：語言 + 狀態 + 登入 -->
         <div class="flex items-center gap-4">
+            <!-- Language Selector -->
+            <div class="flex items-center gap-2 px-3 py-1.5 bg-black/40 border border-white/10">
+                <span class="material-symbols-outlined text-text-secondary text-lg">language</span>
+                <select
+                    :value="i18n.locale.value"
+                    @change="(e: Event) => updateLocale((e.target as HTMLSelectElement).value)"
+                    class="bg-transparent text-text-secondary text-lg font-pixel pt-1 cursor-pointer outline-none border-none"
+                >
+                    <option v-for="lang in i18n.availableLocales" :key="lang" :value="lang" class="bg-surface-dark text-white">
+                        {{ i18n.t("locale.local_name", [], { locale: lang }) }}
+                    </option>
+                </select>
+            </div>
+
             <!-- Online Status -->
             <div class="flex items-center gap-2 px-3 py-1.5 bg-black/40 border border-white/10">
                 <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
