@@ -80,8 +80,8 @@ onMounted(() => {
         zoomAnimationThreshold: 4,
         fadeAnimation: true,
         markerZoomAnimation: true,
-        zoomSnap: 0.5,           // 允許半格縮放，更細膩
-        zoomDelta: 0.5,          // 每次縮放 0.5 級
+        zoomSnap: 1,             // 整數縮放，確保線條寬度一致
+        zoomDelta: 1,            // 每次縮放 1 級
         wheelPxPerZoomLevel: 120 // 滾輪縮放靈敏度
     })
 

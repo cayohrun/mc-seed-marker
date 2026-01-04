@@ -299,7 +299,7 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 		try {
 			await this.generator.configure(
 				this.settingsStore.seed,
-				64,  // tileSize for WASM (internal)
+				256,  // tileSize for WASM (與 Leaflet tileSize 對齊，避免放大導致線條變粗)
 				0,   // library: 0 = Java
 				version.major,
 				version.minor,
@@ -361,7 +361,7 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 
 		try {
 			const renderSize = 64
-			const baseTileSize = 64
+			const baseTileSize = 256  // 與 WASM tileSize 和 Leaflet tileSize 對齊
 			const tileSizeShift = Math.round(Math.log2(this.tileSize / baseTileSize))
 			const zoomOffset = coords.z - tileSizeShift
 			const tileBlockSize = zoomOffset < 0
