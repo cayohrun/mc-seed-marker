@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.3.0] - 2026-01-04 (地圖穩定版)
+
+### Performance
+- 多 Worker 並行渲染：自動使用 min(16, CPU 核心數-1) 個 worker
+- btree 快取共享：fetch 一次後分發給所有 worker，避免重複下載
+- 任務取消機制：透過 requestId 判斷過期任務，丟棄 stale 結果
+
+### Fixed
+- 修復生態系渲染線條過粗問題（tileSize 64→256，zoomSnap 0.5→1）
+- 修復快速拖動時 tile 閃白/缺片的問題
+- 修復取消任務時誤殺新 tile 的 bug（每個 task 綁定自己的 done callback）
+
+### Technical
+- Worker Pool 架構：SSR 安全的 worker 數量計算
+- Barrier 機制：config 更新時暫停任務處理，確保正確渲染順序
+- Version Lock：configUpdateId/btreeLoadId 防止 race condition
+- Disposed Flag：layer 移除後停止所有操作
+
 ## [1.2.0] - 2026-01-03
 
 ### Added
