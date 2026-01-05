@@ -94,8 +94,10 @@ button {
 /* 玻璃面板效果 */
 .glass-panel {
   background-color: rgba(20, 20, 20, 0.9);
+  /* 暫停 blur，效能優先。要回復就取消註解
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  */
   border: 2px solid rgba(100, 100, 100, 0.5);
   box-shadow: 4px 4px 0px 0px rgba(0,0,0,0.5);
 }

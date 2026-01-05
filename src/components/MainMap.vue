@@ -176,22 +176,42 @@ onMounted(() => {
     markers = L.layerGroup().addTo(map)
     userMarkers = L.layerGroup().addTo(map)
 
-    map.addEventListener("mousemove", (evt: L.LeafletMouseEvent) => {
-        //        await datapackStore.registered
-        tooltip_left.value = evt.originalEvent.pageX-4
-        tooltip_top.value = evt.originalEvent.pageY-4
+    // rAF 節流 mousemove，減少主執行緒負擔
+    let pendingMouseEvt: L.LeafletMouseEvent | null = null
+    let mouseRafId: number | null = null
+
+    const flushMousemove = () => {
+        if (!pendingMouseEvt) {
+            mouseRafId = null
+            return
+        }
+
+        const evt = pendingMouseEvt
+        pendingMouseEvt = null
+
+        tooltip_left.value = evt.originalEvent.pageX - 4
+        tooltip_top.value = evt.originalEvent.pageY - 4
 
         const pos = getPosition(map, evt.latlng)
-
-        const biome = loadedDimensionStore.getBiomeSource()?.getBiome(pos[0] >> 2, pos[1] >> 2, pos[2] >> 2, loadedDimensionStore.sampler) ?? Identifier.create("plains")
+        const biome = loadedDimensionStore.getBiomeSource()?.getBiome(
+            pos[0] >> 2, pos[1] >> 2, pos[2] >> 2, loadedDimensionStore.sampler
+        ) ?? Identifier.create("plains")
 
         tooltip_biome.value = biome
         tooltip_position.value = pos
         show_tooltip.value = true
 
-        // 更新底部資訊列座標
         cursorX.value = pos[0]
         cursorZ.value = pos[2]
+
+        mouseRafId = null
+    }
+
+    map.addEventListener("mousemove", (evt: L.LeafletMouseEvent) => {
+        pendingMouseEvt = evt
+        if (mouseRafId === null) {
+            mouseRafId = requestAnimationFrame(flushMousemove)
+        }
     })
 
 
@@ -199,16 +219,107 @@ onMounted(() => {
         show_tooltip.value = false
     })
 
-    // 右鍵點擊 - 新增標記
+    // 右鍵點擊 - 新增標記 (使用 Leaflet popup)
     map.addEventListener("contextmenu", async (evt: L.LeafletMouseEvent) => {
         const pos = getPosition(map, evt.latlng)
-        
-        // 彈出對話框新增標記
-        const name = prompt(i18n.t('markers.prompt_name', '輸入標記名稱:'))
-        if (name && name.trim()) {
-            markersStore.addMarker(name.trim(), pos[0], pos[2])
-            updateUserMarkers()
-        }
+        const popupId = `add-marker-${Date.now()}`
+
+        // 創建顏色選項 HTML
+        const colorOptionsHtml = markersStore.MARKER_COLORS.map(color =>
+            `<option value="${color.value}" style="background-color: ${color.value};">${color.name}</option>`
+        ).join('')
+
+        // 創建圖示選項 HTML
+        const iconOptionsHtml = markersStore.MARKER_ICONS.map(icon =>
+            `<option value="${icon.value}">${icon.name}</option>`
+        ).join('')
+
+        const popupContent = `
+            <div class="add-marker-popup">
+                <div style="font-weight: bold; margin-bottom: 8px; color: #fff;">${i18n.t('markers.add', '新增標記')}</div>
+                <div style="font-size: 12px; color: #aaa; margin-bottom: 8px;">${i18n.t("map.coords.xz", {x: Math.round(pos[0]), z: Math.round(pos[2])})}</div>
+                <input id="${popupId}-name" type="text"
+                    placeholder="${i18n.t('markers.name_placeholder', '標記名稱')}"
+                    style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #555; background: #333; color: #fff; font-size: 12px; margin-bottom: 8px; box-sizing: border-box;"
+                />
+                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <select id="${popupId}-color"
+                        style="flex: 1; padding: 4px; border-radius: 4px; border: 1px solid #555; background: #333; color: #fff; font-size: 12px;">
+                        ${colorOptionsHtml}
+                    </select>
+                    <select id="${popupId}-icon"
+                        style="flex: 1; padding: 4px; border-radius: 4px; border: 1px solid #555; background: #333; color: #fff; font-size: 12px;">
+                        ${iconOptionsHtml}
+                    </select>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button id="${popupId}-cancel"
+                        style="flex: 1; padding: 6px; border-radius: 4px; border: 1px solid #555; background: #444; color: #fff; cursor: pointer; font-size: 12px;">
+                        ${i18n.t('markers.cancel', '取消')}
+                    </button>
+                    <button id="${popupId}-save"
+                        style="flex: 1; padding: 6px; border-radius: 4px; border: none; background: #22c55e; color: #fff; cursor: pointer; font-size: 12px;">
+                        ${i18n.t('markers.confirm', '確認')}
+                    </button>
+                </div>
+            </div>
+        `
+
+        const popup = L.popup({ minWidth: 200, maxWidth: 250, closeButton: true })
+            .setLatLng(evt.latlng)
+            .setContent(popupContent)
+            .openOn(map)
+
+        // 等待 DOM 渲染後綁定事件
+        setTimeout(() => {
+            const nameInput = document.getElementById(`${popupId}-name`) as HTMLInputElement
+            const colorSelect = document.getElementById(`${popupId}-color`) as HTMLSelectElement
+            const iconSelect = document.getElementById(`${popupId}-icon`) as HTMLSelectElement
+            const saveBtn = document.getElementById(`${popupId}-save`)
+            const cancelBtn = document.getElementById(`${popupId}-cancel`)
+
+            if (nameInput) {
+                nameInput.focus()
+
+                // Enter 鍵儲存
+                nameInput.addEventListener('keyup', (e) => {
+                    if (e.key === 'Enter' && nameInput.value.trim()) {
+                        markersStore.addMarker(
+                            nameInput.value.trim(),
+                            Math.round(pos[0]),
+                            Math.round(pos[2]),
+                            colorSelect?.value || '#22c55e',
+                            iconSelect?.value || 'pin'
+                        )
+                        updateUserMarkers()
+                        map.closePopup()
+                    }
+                })
+            }
+
+            if (saveBtn) {
+                saveBtn.onclick = () => {
+                    const name = nameInput?.value.trim()
+                    if (name) {
+                        markersStore.addMarker(
+                            name,
+                            Math.round(pos[0]),
+                            Math.round(pos[2]),
+                            colorSelect?.value || '#22c55e',
+                            iconSelect?.value || 'pin'
+                        )
+                        updateUserMarkers()
+                        map.closePopup()
+                    }
+                }
+            }
+
+            if (cancelBtn) {
+                cancelBtn.onclick = () => {
+                    map.closePopup()
+                }
+            }
+        }, 50)
     })
     
     // Shift + 右鍵 - 複製傳送指令（原功能）
@@ -242,6 +353,8 @@ onMounted(() => {
 
     })*/
 
+    // 避免佈局變動後 Leaflet 尺寸沒刷新
+    setTimeout(() => map.invalidateSize(), 0)
 });
 
 // 清理監聽
@@ -652,11 +765,6 @@ watch(() => [settingsStore.seed, settingsStore.mc_version, settingsStore.dimensi
     </div>
 
     <div class="top">
-        <Transition>
-            <div class="info zoom" v-if="needs_zoom">
-                {{ i18n.t('map.info.structures_hidden') }}
-            </div>
-        </Transition>
         <Transition>
             <div class="info unsupported" v-if="searchStore.structure_sets.has_invalid">
                 {{ i18n.t('map.error.structures_unsupported') }}
