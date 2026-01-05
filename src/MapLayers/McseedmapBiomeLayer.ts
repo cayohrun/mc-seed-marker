@@ -35,6 +35,9 @@ function parseVersion(versionStr: string): { major: number; minor: number; patch
 
 const DEFAULT_MAX_BIOME_ID = 255
 
+// Debug flag - set to true to enable verbose logging
+const DEBUG = false
+
 // Worker pool size calculation (safe for SSR/Node environments)
 function getWorkerPoolSize(): number {
 	if (typeof navigator === 'undefined') return 4  // SSR/Node fallback
@@ -255,6 +258,16 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 	// Disposed flag: prevents operations after layer removal
 	private isDisposed = false
 
+	// Watchdog: track last successful tile render
+	private lastTileRenderedAt = 0
+
+	// Log throttling: count rendered tiles
+	private tileRenderCount = 0
+
+	// RuntimeError auto-reset: prevent infinite reset loop
+	private lastRuntimeResetAt = 0
+	private runtimeResetInFlight = false
+
 	// URLs for worker initialization
 	private workerUrl: URL
 	private wasmUrl: URL
@@ -295,9 +308,10 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 			this.updateConfigAndBtreeThenRedraw().catch(this.logError)
 		})
 
-		// Watch for dimension changes
+		// Watch for dimension changes (force btree redistribute)
 		watch(() => this.settingsStore.dimension, () => {
-			this.updateConfigThenRedraw().catch(this.logError)
+			this.currentBtreeUrl = null
+			this.updateConfigAndBtreeThenRedraw().catch(this.logError)
 		})
 	}
 
@@ -338,6 +352,32 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 
 		// Now redraw with updated config
 		this.invalidateAndRedraw()
+
+		// Watchdog: reset if no tile rendered in 15s while work pending
+		this.scheduleWatchdog(updateId)
+	}
+
+	/**
+	 * Schedule watchdog check
+	 * Triggers if: 15s without any tile rendered AND (queue has tasks OR workers busy)
+	 */
+	private scheduleWatchdog(updateId: number) {
+		const watchdogStart = Date.now()
+
+		setTimeout(async () => {
+			if (this.isDisposed || updateId !== this.configUpdateId) return
+
+			// Check if stuck: no tile rendered since watchdog started
+			const stuck = this.lastTileRenderedAt < watchdogStart
+			// Check if there's work: queue has tasks OR any worker is busy
+			const hasWork = this.taskQueue.length > 0 || this.workers.some(w => w.busy)
+
+			if (stuck && hasWork) {
+				console.warn('[McseedmapBiomeLayer] Watchdog: no tile in 15s, resetting')
+				await this.resetWorkerPool('watchdog: no progress')
+				this.invalidateAndRedraw()
+			}
+		}, 15000)
 	}
 
 	/**
@@ -372,6 +412,9 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 
 		// Now redraw with updated config
 		this.invalidateAndRedraw()
+
+		// Watchdog: reset if no tile rendered in 15s while work pending
+		this.scheduleWatchdog(updateId)
 	}
 
 	/**
@@ -502,6 +545,14 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 		const dimension = DIMENSION_MAP[this.settingsStore.dimension.toString()] ?? 0
 		const largeBiomes = this.settingsStore.world_preset.toString() === 'minecraft:large_biomes'
 
+		if (DEBUG) {
+			console.log('[McseedmapBiomeLayer] configureGenerator:', {
+				dimension,
+				seed: this.settingsStore.seed.toString(),
+				version: `${version.major}.${version.minor}.${version.patch}`
+			})
+		}
+
 		await generator.configure(
 			this.settingsStore.seed,
 			256,  // tileSize for WASM
@@ -545,7 +596,7 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 
 		// Version lock: increment load ID to invalidate any in-flight requests
 		const loadId = ++this.btreeLoadId
-		console.log('[McseedmapBiomeLayer] Loading btree:', btreeFile, 'loadId:', loadId)
+		if (DEBUG) console.log('[McseedmapBiomeLayer] Loading btree:', btreeFile)
 
 		try {
 			// Fetch btree data (once)
@@ -558,12 +609,12 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 				const arrayBuffer = await response.arrayBuffer()
 				btreeData = new Uint8Array(arrayBuffer)
 				this.btreeCache.set(btreeUrl, btreeData)
-				console.log('[McseedmapBiomeLayer] Btree fetched, size:', btreeData.byteLength)
+				if (DEBUG) console.log('[McseedmapBiomeLayer] Btree fetched, size:', btreeData.byteLength)
 			}
 
 			// Check if this load is still valid (no newer request started)
 			if (loadId !== this.btreeLoadId) {
-				console.log('[McseedmapBiomeLayer] Btree load cancelled (stale):', btreeFile)
+				if (DEBUG) console.log('[McseedmapBiomeLayer] Btree load cancelled (stale):', btreeFile)
 				return
 			}
 
@@ -575,12 +626,12 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 
 			// Final check before committing
 			if (loadId !== this.btreeLoadId) {
-				console.log('[McseedmapBiomeLayer] Btree distribution cancelled (stale):', btreeFile)
+				if (DEBUG) console.log('[McseedmapBiomeLayer] Btree distribution cancelled (stale):', btreeFile)
 				return
 			}
 
 			this.currentBtreeUrl = btreeUrl
-			console.log('[McseedmapBiomeLayer] Btree distributed to all workers')
+			if (DEBUG) console.log('[McseedmapBiomeLayer] Btree distributed to workers')
 
 		} catch (error) {
 			console.error('[McseedmapBiomeLayer] Failed to load btree:', error)
@@ -666,12 +717,36 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 			// Check again if task is still valid after async operation
 			if (task.requestId === this.currentRequestId) {
 				task.resolve(buffer)
+				this.lastTileRenderedAt = Date.now()
+				this.tileRenderCount++
+				// Throttled log: every 50 tiles
+				if (DEBUG && this.tileRenderCount % 50 === 0) {
+					console.log(`[McseedmapBiomeLayer] Rendered ${this.tileRenderCount} tiles`)
+				}
 			} else {
 				this.finishTask(task)
 			}
 
 		} catch (error) {
-			console.error('[McseedmapBiomeLayer] Task execution error:', error)
+			console.error('[McseedmapBiomeLayer] Task error:', error, (error as any)?.message)
+
+			// Auto-reset on RuntimeError (WASM crash), with 5s cooldown
+			const isRuntime = (error as any)?.name === 'RuntimeError'
+			const now = Date.now()
+			if (isRuntime && !this.runtimeResetInFlight && now - this.lastRuntimeResetAt > 5000) {
+				this.runtimeResetInFlight = true
+				this.lastRuntimeResetAt = now
+				console.warn('[McseedmapBiomeLayer] RuntimeError detected, resetting workers')
+				try {
+					await this.resetWorkerPool('runtime error')
+					this.invalidateAndRedraw()
+				} catch (resetErr) {
+					console.error('[McseedmapBiomeLayer] Reset failed:', resetErr)
+				} finally {
+					this.runtimeResetInFlight = false
+				}
+			}
+
 			this.finishTask(task)
 		} finally {
 			worker.busy = false
