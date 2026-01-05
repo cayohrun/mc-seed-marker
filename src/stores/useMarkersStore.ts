@@ -71,8 +71,20 @@ export const useMarkersStore = defineStore('markers', () => {
 
   // 設定當前 seed
   function setSeed(seed: bigint, version: string, dimension: string) {
-    currentSeedKey.value = `${seed.toString()}_${version}_${dimension}`
-    markers.value = allMarkersData.value[currentSeedKey.value] || []
+    const key = `${seed.toString()}_${version}_${dimension}`
+    currentSeedKey.value = key
+
+    // 如果資料還沒載完，等載完再讀
+    if (!isLoaded.value) {
+      loadMarkers().then(() => {
+        if (currentSeedKey.value === key) {
+          markers.value = allMarkersData.value[key] || []
+        }
+      })
+      return
+    }
+
+    markers.value = allMarkersData.value[key] || []
   }
 
   // 新增標記

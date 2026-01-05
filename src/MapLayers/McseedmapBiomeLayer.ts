@@ -324,8 +324,11 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 			if (!this.isPoolReady) {
 				this.pendingConfigUpdate = true
 			} else {
-				await this.updateAllGenerators()
+				await this.withTimeout(this.updateAllGenerators(), 3000, 'updateAllGenerators')
 			}
+		} catch (err) {
+			console.error('[McseedmapBiomeLayer] updateConfig failed:', err)
+			await this.resetWorkerPool('config update failed')
 		} finally {
 			this.isUpdating = false
 		}
@@ -354,9 +357,12 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 				this.pendingConfigUpdate = true
 				this.pendingBtreeUpdate = true
 			} else {
-				await this.updateAllGenerators()
-				await this.loadAndDistributeBtree()
+				await this.withTimeout(this.updateAllGenerators(), 3000, 'updateAllGenerators')
+				await this.withTimeout(this.loadAndDistributeBtree(), 5000, 'loadAndDistributeBtree')
 			}
+		} catch (err) {
+			console.error('[McseedmapBiomeLayer] updateConfig+btree failed:', err)
+			await this.resetWorkerPool('config+btree update failed')
 		} finally {
 			this.isUpdating = false
 		}
@@ -830,5 +836,31 @@ export class McseedmapBiomeLayer extends L.GridLayer {
 		// Clear worker array
 		this.workers = []
 		this.isPoolReady = false
+	}
+
+	/**
+	 * Execute a promise with timeout
+	 */
+	private async withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+		let timeoutId: ReturnType<typeof setTimeout> | null = null
+		const timeout = new Promise<never>((_, reject) => {
+			timeoutId = setTimeout(() => reject(new Error(`${label} timeout`)), ms)
+		})
+		try {
+			return await Promise.race([promise, timeout])
+		} finally {
+			if (timeoutId) clearTimeout(timeoutId)
+		}
+	}
+
+	/**
+	 * Reset the worker pool when stuck
+	 */
+	private async resetWorkerPool(reason: string) {
+		console.warn('[McseedmapBiomeLayer] Reset worker pool:', reason)
+		this.terminateAllWorkers()
+		this.initFailed = false
+		this.initPromise = this.initWorkerPool()
+		await this.initPromise
 	}
 }
