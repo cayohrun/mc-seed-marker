@@ -75,6 +75,7 @@
     "dropdown.structure_positions.placeholder": "查找结构",
     "toggle_sidebar.title": "侧边栏开关",
     "map.info.structures_hidden": "部分结构被隐藏，请放大查看。",
+    "map.zoom_hint": "放大以显示所有已选结构",
     "map.info.teleport_command_copied": "传送命令已复制",
     "map.error.structures_unsupported": "抱歉，部分选中的结构无法显示。",
     "map.yslider.aria-label": "Y 轴",

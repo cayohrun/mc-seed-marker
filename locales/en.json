@@ -111,6 +111,7 @@
     "modrinth.ignore-version.notice": "Datapacks for other versions might not work as expected",
     "toggle_sidebar.title": "Toggle Sidebar",
     "map.info.structures_hidden": "Some structures are hidden. Zoom in to see more.",
+    "map.zoom_hint": "Zoom in to show all selected features",
     "map.info.teleport_command_copied": "Teleport Command Copied",
     "map.error.structures_unsupported": "Some selected structures are unsupported! Sorry.",
     "map.tooltip.spawn": "Spawn Point",

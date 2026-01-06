@@ -13,6 +13,7 @@ import OpenDropdown from './dropdown/OpenDropdown.vue';
 import { vOnClickOutside } from '@vueuse/components';
 import { EventTracker } from '../util/EventTracker';
 import { useI18n } from 'vue-i18n';
+import { isStructureInDimension } from '../utils/dimensionStructures';
 
 
 const i18n = useI18n()
@@ -36,10 +37,12 @@ const biomeSearchInput = ref('')
 // Map Layers 狀態
 const showSlimeChunks = ref(false)
 
-// 結構列表
+// 結構列表（根據當前維度過濾）
 const availableStructures = computed(() => {
+  const dimensionId = settingsStore.dimension.toString()
   return [...WorldgenStructure.REGISTRY.keys()]
     .filter(id => !loadedDimensionStore.loaded_dimension.hidden_structures?.has(id.toString()))
+    .filter(id => isStructureInDimension(id.toString(), dimensionId))
     .map(id => ({
       id: id.toString(),
       name: settingsStore.getLocalizedName('structure', id, false)
@@ -295,7 +298,6 @@ function dragOverHandler(ev: DragEvent) {
                 <span class="material-symbols-outlined text-white text-[18px]">temple_hindu</span>
               </div>
               <span class="text-lg font-pixel pt-1">Structures</span>
-              <span v-if="searchStore.structures.size > 0" class="text-xs text-primary">({{ searchStore.structures.size }})</span>
             </div>
             <span class="material-symbols-outlined text-text-secondary transition-transform" :class="{ 'rotate-180': structureDropdownOpen }">expand_more</span>
           </div>

@@ -67,6 +67,7 @@
     "dropdown.structure_positions.placeholder": "構造物を検索",
     "toggle_sidebar.title": "サイドバーを切り替え",
     "map.info.structures_hidden": "一部の構造物は非表示です。拡大して詳細を表示してください。",
+    "map.zoom_hint": "Zoom in to show all selected features",
     "map.info.teleport_command_copied": "テレポートコマンドがコピーされました",
     "map.tooltip.spawn": "初期スポーン",
     "map.setting.project": "テレポートの高さを地表にする",

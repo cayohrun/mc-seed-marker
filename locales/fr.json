@@ -84,6 +84,7 @@
     "dropdown.add.built_in.update_1_21": "Mise à jour 1.21",
     "toggle_sidebar.title": "Basculer la barre latérale",
     "map.info.structures_hidden": "Certaines structures sont cachées. Zoomez pour en voir plus.",
+    "map.zoom_hint": "Zoom in to show all selected features",
     "footer.more": "plus…",
     "settings.mc_version.mc1_20_6": "Minecraft 1.20.6",
     "tip_message.kofi": "Offrez moi un café",

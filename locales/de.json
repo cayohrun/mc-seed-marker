@@ -40,6 +40,7 @@
     "map.coords.xz": "{x}, {z}",
     "map.error.structures_unsupported": "Einige ausgewählte Strukturen werden nicht unterstützt! Sorry.",
     "map.info.structures_hidden": "Einige Strukturen werden nicht angezeigt. Heranzoomen um mehr zu sehen.",
+    "map.zoom_hint": "Zoom in to show all selected features",
     "map.info.teleport_command_copied": "Teleport-Befehl kopiert",
     "map.setting.graticule": "Zeige das Regionsgitter",
     "map.setting.hillshade": "Schattierung aktivieren",

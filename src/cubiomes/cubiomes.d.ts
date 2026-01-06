@@ -34,6 +34,8 @@ export interface CubiomesModule {
   _cubiomes_gen_heightmap: (quartX: number, quartZ: number, width: number, height: number, outPtr: number) => number
   _cubiomes_biome_to_str: (biomeId: number) => number
   _cubiomes_get_biome_at: (blockX: number, blockZ: number, yLevel: number) => number
+  _cubiomes_get_bastion_type: (blockX: number, blockZ: number) => number
+  _cubiomes_end_city_has_ship: (chunkX: number, chunkZ: number) => number
   _cubiomes_alloc: (size: number) => number
   _cubiomes_free: (ptr: number) => void
   _cubiomes_get_mc_version: () => number

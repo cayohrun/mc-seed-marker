@@ -29,7 +29,7 @@ const editColor = ref('')
 const editIcon = ref('')
 
 // 展開面板
-const isExpanded = ref(true)
+const isExpanded = ref(false)
 const showAddForm = ref(false)
 
 // 監聽 seed 變化
@@ -170,9 +170,8 @@ defineExpose({ fillCoordinates })
     <div v-if="isExpanded" class="panel-content">
       <!-- 新增按鈕 -->
       <div class="action-buttons">
-        <button class="btn btn-primary" @click="showAddForm = !showAddForm">
+        <button class="btn btn-primary" @click="showAddForm = !showAddForm" :title="i18n.t('markers.add', '新增標記')">
           <FontAwesomeIcon :icon="['fas', 'plus']" />
-          {{ i18n.t('markers.add', '新增標記') }}
         </button>
         <button class="btn btn-secondary" @click="exportMarkers" :disabled="markersStore.markers.length === 0">
           <FontAwesomeIcon :icon="['fas', 'download']" />
@@ -205,17 +204,31 @@ defineExpose({ fillCoordinates })
             class="input coord-input"
           />
         </div>
-        <div class="form-row">
-          <select v-model="newMarkerColor" class="input">
-            <option v-for="color in markersStore.MARKER_COLORS" :key="color.value" :value="color.value">
-              {{ color.name }}
-            </option>
-          </select>
-          <select v-model="newMarkerIcon" class="input">
-            <option v-for="icon in markersStore.MARKER_ICONS" :key="icon.value" :value="icon.value">
-              {{ icon.name }}
-            </option>
-          </select>
+        <div class="picker-row">
+          <div class="color-picker">
+            <button
+              v-for="color in markersStore.MARKER_COLORS"
+              :key="color.value"
+              class="color-btn"
+              :class="{ active: newMarkerColor === color.value }"
+              :style="{ backgroundColor: color.value }"
+              :title="color.name"
+              @click="newMarkerColor = color.value"
+            ></button>
+          </div>
+          <div class="icon-picker">
+            <button
+              v-for="icon in markersStore.MARKER_ICONS"
+              :key="icon.value"
+              class="icon-btn"
+              :class="{ active: newMarkerIcon === icon.value }"
+              :style="newMarkerIcon === icon.value ? { borderColor: newMarkerColor, backgroundColor: newMarkerColor + '33' } : {}"
+              :title="icon.name"
+              @click="newMarkerIcon = icon.value"
+            >
+              <FontAwesomeIcon :icon="['fas', icon.icon]" />
+            </button>
+          </div>
         </div>
         <div class="form-actions">
           <button class="btn btn-success" @click="addMarker">
@@ -246,17 +259,31 @@ defineExpose({ fillCoordinates })
               <input v-model="editX" type="number" class="input coord-input" />
               <input v-model="editZ" type="number" class="input coord-input" />
             </div>
-            <div class="form-row">
-              <select v-model="editColor" class="input">
-                <option v-for="color in markersStore.MARKER_COLORS" :key="color.value" :value="color.value">
-                  {{ color.name }}
-                </option>
-              </select>
-              <select v-model="editIcon" class="input">
-                <option v-for="icon in markersStore.MARKER_ICONS" :key="icon.value" :value="icon.value">
-                  {{ icon.name }}
-                </option>
-              </select>
+            <div class="picker-row">
+              <div class="color-picker">
+                <button
+                  v-for="color in markersStore.MARKER_COLORS"
+                  :key="color.value"
+                  class="color-btn"
+                  :class="{ active: editColor === color.value }"
+                  :style="{ backgroundColor: color.value }"
+                  :title="color.name"
+                  @click="editColor = color.value"
+                ></button>
+              </div>
+              <div class="icon-picker">
+                <button
+                  v-for="icon in markersStore.MARKER_ICONS"
+                  :key="icon.value"
+                  class="icon-btn"
+                  :class="{ active: editIcon === icon.value }"
+                  :style="editIcon === icon.value ? { borderColor: editColor, backgroundColor: editColor + '33' } : {}"
+                  :title="icon.name"
+                  @click="editIcon = icon.value"
+                >
+                  <FontAwesomeIcon :icon="['fas', icon.icon]" />
+                </button>
+              </div>
             </div>
             <div class="edit-actions">
               <button class="btn btn-success btn-sm" @click="saveEdit">
@@ -430,6 +457,60 @@ defineExpose({ fillCoordinates })
 
 .form-row select {
   flex: 1;
+}
+
+.picker-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.color-picker,
+.icon-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.color-btn {
+  width: 22px;
+  height: 22px;
+  border: 2px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.color-btn:hover {
+  transform: scale(1.1);
+}
+
+.color-btn.active {
+  border-color: white;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.15s;
+}
+
+.icon-btn:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.icon-btn.active {
+  /* border-color and background-color set via inline style */
 }
 
 .form-actions {

@@ -40,6 +40,7 @@
     "map.coords.xz": "{x}, {z}",
     "map.error.structures_unsupported": "חלק מהמבנים שנבחרו אינם נתמכים! סליחה.",
     "map.info.structures_hidden": "חלק מהמבנים מוסתרים. הגדל כדי לראות עוד.",
+    "map.zoom_hint": "Zoom in to show all selected features",
     "map.info.teleport_command_copied": "פקודת הטלפורטציה הועתקה",
     "map.setting.graticule": "הצג רשת אזורים",
     "map.setting.hillshade": "הפעל הצללת גבעות",

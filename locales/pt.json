@@ -70,6 +70,7 @@
     "dropdown.structure_positions.placeholder": "Procurar estrutura",
     "toggle_sidebar.title": "Alterar a barra lateral",
     "map.info.structures_hidden": "Algumas estruturas estão ocultas. Use o zoom para ver mais.",
+    "map.zoom_hint": "Zoom in to show all selected features",
     "map.info.teleport_command_copied": "Copiado o comando de teletransporte",
     "settings.world_preset.aria-label": "Predef. do mundo",
     "settings.dimension.label": "Dimensão:",

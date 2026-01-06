@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { ref, watch, toRaw } from 'vue'
 import { get, set } from 'idb-keyval'
 
 export interface Marker {
@@ -63,7 +63,9 @@ export const useMarkersStore = defineStore('markers', () => {
   // 儲存到 IndexedDB
   async function saveMarkers() {
     try {
-      await set(STORAGE_KEY, allMarkersData.value)
+      // 使用 toRaw 移除 Vue Proxy，否則 IndexedDB 無法序列化
+      const rawData = JSON.parse(JSON.stringify(toRaw(allMarkersData.value)))
+      await set(STORAGE_KEY, rawData)
     } catch (e) {
       console.error('Failed to save markers:', e)
     }

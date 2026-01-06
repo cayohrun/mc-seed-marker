@@ -20,6 +20,10 @@ import { SpawnTarget } from '../util/SpawnTarget';
 import { useI18n } from 'vue-i18n';
 import { versionMetadata } from "../util";
 import MarkersPanel from './MarkersPanel.vue';
+import { isStructureInDimension } from '../utils/dimensionStructures';
+import { useCubiomesStructure } from '../cubiomes/useCubiomesStructure';
+import { icon as faIcon } from '@fortawesome/fontawesome-svg-core';
+import { faHouse, faWheatAwn, faGem, faBuilding, faChessRook, faLandmark, faDoorOpen, faLocationDot } from '@fortawesome/free-solid-svg-icons';
 
 const emit = defineEmits<{
   (e: 'add-marker', x: number, z: number): void
@@ -33,6 +37,7 @@ const loadedDimensionStore = useLoadedDimensionStore()
 const markersStore = useMarkersStore()
 const structureNotesStore = useStructureNotesStore()
 const i18n = useI18n()
+const { getBastionType, endCityHasShip } = useCubiomesStructure()
 
 let biomeLayer: McseedmapBiomeLayer | CubiomesBiomeLayer
 let graticule: Graticule
@@ -242,33 +247,34 @@ onMounted(() => {
         const pos = getPosition(map, evt.latlng)
         const popupId = `add-marker-${Date.now()}`
 
-        // 創建顏色選項 HTML
-        const colorOptionsHtml = markersStore.MARKER_COLORS.map(color =>
-            `<option value="${color.value}" style="background-color: ${color.value};">${color.name}</option>`
+        // 創建顏色按鈕 HTML（色塊）
+        const colorButtonsHtml = markersStore.MARKER_COLORS.map((color, i) =>
+            `<button data-color="${color.value}" class="${popupId}-color-btn" title="${color.name}"
+                style="width: 22px; height: 22px; background-color: ${color.value}; border: 2px solid ${i === 0 ? '#333' : 'transparent'}; border-radius: 2px; cursor: pointer; padding: 0;">
+            </button>`
         ).join('')
 
-        // 創建圖示選項 HTML
-        const iconOptionsHtml = markersStore.MARKER_ICONS.map(icon =>
-            `<option value="${icon.value}">${icon.name}</option>`
+        // 創建圖示按鈕 HTML（使用 FontAwesome SVG）
+        const defaultColor = markersStore.MARKER_COLORS[0].value
+        const iconButtonsHtml = markersStore.MARKER_ICONS.map((icon, i) =>
+            `<button data-icon="${icon.value}" class="${popupId}-icon-btn" title="${icon.name}"
+                style="width: 26px; height: 26px; background: ${i === 0 ? defaultColor + '33' : 'rgba(0,0,0,0.05)'}; border: 2px solid ${i === 0 ? defaultColor : 'transparent'}; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #666;">
+                <span style="width: 14px; height: 14px; display: flex; align-items: center; justify-content: center;">${getIconSvg(icon.value)}</span>
+            </button>`
         ).join('')
 
         const popupContent = `
             <div class="add-marker-popup">
-                <div style="font-weight: bold; margin-bottom: 8px; color: #fff;">${i18n.t('markers.add', '新增標記')}</div>
                 <div style="font-size: 12px; color: #aaa; margin-bottom: 8px;">${i18n.t("map.coords.xz", {x: Math.round(pos[0]), z: Math.round(pos[2])})}</div>
                 <input id="${popupId}-name" type="text"
                     placeholder="${i18n.t('markers.name_placeholder', '標記名稱')}"
                     style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #555; background: #333; color: #fff; font-size: 12px; margin-bottom: 8px; box-sizing: border-box;"
                 />
-                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                    <select id="${popupId}-color"
-                        style="flex: 1; padding: 4px; border-radius: 4px; border: 1px solid #555; background: #333; color: #fff; font-size: 12px;">
-                        ${colorOptionsHtml}
-                    </select>
-                    <select id="${popupId}-icon"
-                        style="flex: 1; padding: 4px; border-radius: 4px; border: 1px solid #555; background: #333; color: #fff; font-size: 12px;">
-                        ${iconOptionsHtml}
-                    </select>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
+                    ${colorButtonsHtml}
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
+                    ${iconButtonsHtml}
                 </div>
                 <div style="display: flex; gap: 8px;">
                     <button id="${popupId}-cancel"
@@ -283,7 +289,7 @@ onMounted(() => {
             </div>
         `
 
-        const popup = L.popup({ minWidth: 200, maxWidth: 250, closeButton: true })
+        const popup = L.popup({ minWidth: 260, maxWidth: 280, closeButton: true })
             .setLatLng(evt.latlng)
             .setContent(popupContent)
             .openOn(map)
@@ -291,10 +297,45 @@ onMounted(() => {
         // 等待 DOM 渲染後綁定事件
         setTimeout(() => {
             const nameInput = document.getElementById(`${popupId}-name`) as HTMLInputElement
-            const colorSelect = document.getElementById(`${popupId}-color`) as HTMLSelectElement
-            const iconSelect = document.getElementById(`${popupId}-icon`) as HTMLSelectElement
+            const colorBtns = document.querySelectorAll(`.${popupId}-color-btn`) as NodeListOf<HTMLButtonElement>
+            const iconBtns = document.querySelectorAll(`.${popupId}-icon-btn`) as NodeListOf<HTMLButtonElement>
             const saveBtn = document.getElementById(`${popupId}-save`)
             const cancelBtn = document.getElementById(`${popupId}-cancel`)
+
+            // 追蹤選中的值
+            let selectedColor = markersStore.MARKER_COLORS[0].value
+            let selectedIcon = markersStore.MARKER_ICONS[0].value
+
+            // 顏色按鈕點擊事件
+            colorBtns.forEach(btn => {
+                btn.onclick = () => {
+                    selectedColor = btn.dataset.color || selectedColor
+                    // 更新所有顏色按鈕樣式
+                    colorBtns.forEach(b => b.style.borderColor = 'transparent')
+                    btn.style.borderColor = '#333'
+                    // 更新選中 icon 按鈕的邊框和背景
+                    iconBtns.forEach(b => {
+                        if (b.dataset.icon === selectedIcon) {
+                            b.style.borderColor = selectedColor
+                            b.style.background = selectedColor + '33'
+                        }
+                    })
+                }
+            })
+
+            // 圖示按鈕點擊事件
+            iconBtns.forEach(btn => {
+                btn.onclick = () => {
+                    selectedIcon = btn.dataset.icon || selectedIcon
+                    // 更新所有圖示按鈕樣式
+                    iconBtns.forEach(b => {
+                        b.style.borderColor = 'transparent'
+                        b.style.background = 'rgba(0,0,0,0.05)'
+                    })
+                    btn.style.borderColor = selectedColor
+                    btn.style.background = selectedColor + '33'
+                }
+            })
 
             if (nameInput) {
                 nameInput.focus()
@@ -306,8 +347,8 @@ onMounted(() => {
                             nameInput.value.trim(),
                             Math.round(pos[0]),
                             Math.round(pos[2]),
-                            colorSelect?.value || '#22c55e',
-                            iconSelect?.value || 'pin'
+                            selectedColor,
+                            selectedIcon
                         )
                         updateUserMarkers()
                         map.closePopup()
@@ -323,8 +364,8 @@ onMounted(() => {
                             name,
                             Math.round(pos[0]),
                             Math.round(pos[2]),
-                            colorSelect?.value || '#22c55e',
-                            iconSelect?.value || 'pin'
+                            selectedColor,
+                            selectedIcon
                         )
                         updateUserMarkers()
                         map.closePopup()
@@ -428,11 +469,27 @@ function updateMarkers() {
     const MAX_TASKS_PER_UPDATE = 500
     let taskCount = 0
 
+    const dimensionId = settingsStore.dimension.toString()
+
     for (const id of searchStore.structure_sets.sets) {
         const set = StructureSet.REGISTRY.get(id)
         if (!set) continue
 
+        const hasStructureInDimension = set.structures.some(s => {
+            const structureId = s.structure.key()?.toString()
+            return structureId ? isStructureInDimension(structureId, dimensionId) : false
+        })
+
+        if (!hasStructureInDimension) {
+            continue
+        }
+
         var minZoom = 2
+
+        // 檢查是否包含 End City（需要在較低縮放就能顯示）
+        const hasEndCity = set.structures.some(s =>
+            s.structure.key()?.toString() === 'minecraft:end_city'
+        )
 
         if (set.placement instanceof StructurePlacement.ConcentricRingsStructurePlacement){
             set.placement.prepare(biomeSource, loadedDimensionStore.sampler, settingsStore.seed)
@@ -440,6 +497,11 @@ function updateMarkers() {
         } else if (set.placement instanceof StructurePlacement.RandomSpreadStructurePlacement) {
             const chunkFrequency = (set.placement.frequency) / (set.placement.spacing * set.placement.spacing)
             minZoom = -Math.log2(1/(chunkFrequency * 128))
+        }
+
+        // End City 使用更低的最小縮放（照 Chunkbase 邏輯）
+        if (hasEndCity) {
+            minZoom = -4
         }
 
         if (map.getZoom() >= minZoom){
@@ -466,13 +528,17 @@ function updateMarkers() {
                             cachedBiomeSource.setupCache(chunk[0] << 2, chunk[1] << 2)
                             const structure = set.getStructureInChunk(chunk[0], chunk[1], context)
 
-                            const marker = structure && searchStore.structures.has(structure.id.toString()) ? getMarker(structure.id, structure.pos) : undefined
+                            const shouldShow = structure &&
+                                searchStore.structures.has(structure.id.toString()) &&
+                                isStructureInDimension(structure.id.toString(), dimensionId)
+                            const marker = shouldShow ? getMarker(structure.id, structure.pos) : undefined
                             m.structure = structure
                             m.marker = marker
                         })
                     } else {
                         if (stored.structure){
-                            const should_have_marker = searchStore.structures.has(stored.structure?.id.toString())
+                            const should_have_marker = searchStore.structures.has(stored.structure?.id.toString()) &&
+                                isStructureInDimension(stored.structure.id.toString(), dimensionId)
                             if (should_have_marker && stored.marker === undefined){
                                 stored.marker = getMarker(stored.structure.id, stored.structure.pos)
                             } else if (!should_have_marker && stored.marker !== undefined){
@@ -505,6 +571,11 @@ function getMarker(structureId: Identifier, pos: BlockPos) {
     const mapPos = new L.Point(pos[0], -pos[2])
     const structureIdStr = structureId.toString()
 
+    // 檢查是否需要顯示結構詳細資訊
+    const isEndCity = structureIdStr === 'minecraft:end_city'
+    const isBastion = structureIdStr === 'minecraft:bastion_remnant'
+    const needsStructureDetail = isEndCity || isBastion
+
     // 創建彈窗內容生成函數
     const createPopupContent = () => {
         const note = structureNotesStore.getNote(structureIdStr, pos[0], pos[2])
@@ -516,10 +587,18 @@ function getMarker(structureId: Identifier, pos: BlockPos) {
             `<option value="${icon.value}" ${currentIcon === icon.value ? 'selected' : ''}>${icon.name}</option>`
         ).join('')
 
+        // 結構詳細資訊區塊（End City / Bastion）
+        const structureDetailHtml = needsStructureDetail ? `
+            <div id="structure-detail-${pos[0]}-${pos[2]}" class="structure-detail" style="margin: 8px 0; padding: 6px; background: #2a2a2a; border-radius: 4px; font-size: 12px; color: #aaa;">
+                <span class="loading">Loading...</span>
+            </div>
+        ` : ''
+
         return `
             <div class="structure-popup">
                 <div class="structure-name">${settingsStore.getLocalizedName("structure", structureId, false)}</div>
                 <div class="structure-coords">${i18n.t("map.coords.xyz", {x: pos[0], y: pos[1], z: pos[2]})}</div>
+                ${structureDetailHtml}
                 <hr style="margin: 8px 0; border-color: #444;" />
                 <div class="structure-note-section">
                     <label style="font-size: 11px; color: #aaa;">備註：</label>
@@ -549,10 +628,40 @@ function getMarker(structureId: Identifier, pos: BlockPos) {
     marker.bindPopup(popup).addTo(markers)
 
     // 當彈窗打開時，綁定儲存按鈕事件
-    marker.on('popupopen', () => {
+    marker.on('popupopen', async () => {
         const saveBtn = document.getElementById(`save-note-${pos[0]}-${pos[2]}`)
         const noteInput = document.getElementById(`note-input-${pos[0]}-${pos[2]}`) as HTMLTextAreaElement
         const iconSelect = document.getElementById(`icon-select-${pos[0]}-${pos[2]}`) as HTMLSelectElement
+        const detailEl = document.getElementById(`structure-detail-${pos[0]}-${pos[2]}`)
+
+        // 載入結構詳細資訊
+        if (detailEl && needsStructureDetail) {
+            try {
+                if (isEndCity) {
+                    const chunkX = pos[0] >> 4
+                    const chunkZ = pos[2] >> 4
+                    const hasShip = await endCityHasShip(chunkX, chunkZ)
+                    if (hasShip === null) {
+                        detailEl.innerHTML = '<span style="color: #888;">Likely End City</span>'
+                    } else if (hasShip) {
+                        detailEl.innerHTML = '<span style="color: #4ade80;">End City (with ship)</span>'
+                    } else {
+                        detailEl.innerHTML = '<span style="color: #facc15;">End City (without ship)</span>'
+                    }
+                } else if (isBastion) {
+                    const variant = await getBastionType(pos[0], pos[2])
+                    if (variant === null) {
+                        detailEl.innerHTML = '<span style="color: #888;">Bastion Remnant</span>'
+                    } else {
+                        // 只顯示 Variant X，不猜測類型名稱
+                        detailEl.innerHTML = `<span style="color: #f97316;">Bastion (Variant ${variant})</span>`
+                    }
+                }
+            } catch (err) {
+                console.error('[MainMap] Structure detail error:', err)
+                detailEl.innerHTML = '<span style="color: #666;">Unable to load details</span>'
+            }
+        }
 
         if (saveBtn && noteInput && iconSelect) {
             saveBtn.onclick = () => {
@@ -631,9 +740,10 @@ function addUserMarkerToMap(userMarker: Marker) {
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 12px;
         ">
-            <i class="fa-solid fa-${getIconName(userMarker.icon)}"></i>
+            <span style="width: 14px; height: 14px; display: flex; align-items: center; justify-content: center;">
+                ${getIconSvg(userMarker.icon)}
+            </span>
         </div>
     `
     
@@ -656,18 +766,19 @@ function addUserMarkerToMap(userMarker: Marker) {
     user_marker_map.set(userMarker.id, marker)
 }
 
-function getIconName(iconValue: string): string {
-    const iconMap: { [key: string]: string } = {
-        'home': 'house',
-        'farm': 'wheat-awn',
-        'mine': 'gem',
-        'village': 'building',
-        'fortress': 'chess-rook',
-        'temple': 'landmark',
-        'portal': 'door-open',
-        'pin': 'location-dot'
+function getIconSvg(iconValue: string): string {
+    const iconMap: { [key: string]: any } = {
+        'home': faHouse,
+        'farm': faWheatAwn,
+        'mine': faGem,
+        'village': faBuilding,
+        'fortress': faChessRook,
+        'temple': faLandmark,
+        'portal': faDoorOpen,
+        'pin': faLocationDot
     }
-    return iconMap[iconValue] || 'location-dot'
+    const iconDef = iconMap[iconValue] || faLocationDot
+    return faIcon(iconDef).html[0]
 }
 
 // 跳轉到指定座標
@@ -794,6 +905,12 @@ watch(() => [settingsStore.seed, settingsStore.mc_version, settingsStore.dimensi
             {{ i18n.t('map.info.teleport_command_copied') }}
         </div>
     </Transition>
+    <!-- <Transition>
+        <div class="zoom-hint" v-if="needs_zoom">
+            <span class="material-symbols-outlined">warning</span>
+            {{ i18n.t('map.zoom_hint') }}
+        </div>
+    </Transition> -->
 
     <!-- 自訂標記面板 - TP 下方 -->
     <div class="absolute right-6 top-20 z-[500]">
@@ -900,6 +1017,29 @@ watch(() => [settingsStore.seed, settingsStore.mc_version, settingsStore.dimensi
 .unsupported {
     background-color: rgb(165, 33, 33);
     border: 2px solid white
+}
+
+.zoom-hint {
+    position: absolute;
+    z-index: 500;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 5.5rem;
+    padding: 0.4rem 1rem;
+    border-radius: 0.5rem;
+    background-color: rgba(180, 120, 30, 0.95);
+    color: #fff;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    user-select: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.zoom-hint .material-symbols-outlined {
+    font-size: 1.2rem;
+    color: #ffe066;
 }
 
 </style>

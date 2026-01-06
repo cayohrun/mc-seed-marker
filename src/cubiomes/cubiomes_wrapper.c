@@ -9,6 +9,7 @@
 #include "vendor/generator.h"
 #include "vendor/biomes.h"
 #include "vendor/biomenoise.h"
+#include "vendor/finders.h"
 #include "vendor/util.h"
 
 // Global generator instance
@@ -158,4 +159,37 @@ void cubiomes_free(int* ptr) {
 EMSCRIPTEN_KEEPALIVE
 int cubiomes_get_mc_version() {
     return g.mc;
+}
+
+/**
+ * Get Bastion variant type
+ * @param blockX Block X coordinate
+ * @param blockZ Block Z coordinate
+ * @return 0..3 for variant type, -1 on failure
+ */
+EMSCRIPTEN_KEEPALIVE
+int cubiomes_get_bastion_type(int blockX, int blockZ) {
+    if (!initialized) return -1;
+    StructureVariant sv;
+    int result = getVariant(&sv, Bastion, g.mc, g.seed, blockX, blockZ, -1);
+    if (result == 0) return -1;
+    return sv.start;  // 0..3
+}
+
+/**
+ * Check if End City has a ship
+ * @param chunkX Chunk X coordinate (blockX >> 4)
+ * @param chunkZ Chunk Z coordinate (blockZ >> 4)
+ * @return 1 if has ship, 0 if no ship, -1 on failure
+ */
+EMSCRIPTEN_KEEPALIVE
+int cubiomes_end_city_has_ship(int chunkX, int chunkZ) {
+    if (!initialized) return -1;
+    Piece pieces[END_CITY_PIECES_MAX];
+    int count = getEndCityPieces(pieces, g.seed, chunkX, chunkZ);
+    if (count <= 0) return -1;
+    for (int i = 0; i < count; i++) {
+        if (pieces[i].type == END_SHIP) return 1;
+    }
+    return 0;
 }

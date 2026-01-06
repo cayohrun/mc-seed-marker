@@ -84,6 +84,7 @@
     "dropdown.add.built_in.title": "Встроенные наборы данных",
     "dropdown.add.recents.not_found": "Набор не найден. Удаление из недавно использованных.",
     "map.info.structures_hidden": "Некоторые строения скрыты. Приблизьте, чтобы увидеть больше.",
+    "map.zoom_hint": "Zoom in to show all selected features",
     "footer.more": "ещё…",
     "settings.mc_version.mc1_20_6": "Minecraft 1.20.6",
     "tip_message.kofi": "Купи мне Кофе",

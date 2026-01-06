@@ -40,6 +40,7 @@
     "map.coords.xz": "{x}, {z}",
     "map.error.structures_unsupported": "Seçilen bazı yapılar desteklenmiyor! Üzgünüz.",
     "map.info.structures_hidden": "Bazı yapılar gizlenmiştir. Daha fazlasını görmek için yakınlaştırın.",
+    "map.zoom_hint": "Zoom in to show all selected features",
     "map.info.teleport_command_copied": "Işınlama Komutu Kopyalandı",
     "map.setting.graticule": "Bölge ızgarasını göster",
     "map.setting.hillshade": "Kabartmaları Etkinleştir",

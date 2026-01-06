@@ -107,6 +107,7 @@
     "modrinth.ignore-version.notice": "Datapacks cho những phiên bản khác có thể hoạt động không muốn",
     "toggle_sidebar.title": "Bật/Tắt SideBar",
     "map.info.structures_hidden": "Một số công trình đang ẩn. Phóng to để nhìn.",
+    "map.zoom_hint": "Zoom in to show all selected features",
     "map.info.teleport_command_copied": "Đã Sao Chép Lệnh Dịch Chuyển",
     "map.error.structures_unsupported": "Một số công trình được lựa chọn không được hỗ trợ! Xin lỗi.",
     "map.tooltip.spawn": "Điểm Hồi Sinh"
