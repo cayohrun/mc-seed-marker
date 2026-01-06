@@ -494,18 +494,42 @@ export class CubiomesBiomeLayer extends L.GridLayer {
 				const quartZ = Math.floor(blockZ / heightScale) - 1
 				const data = new Float32Array(gridWidth * gridHeight)
 				let idx = 0
+				const threshold = 0.390625
+				const bisectIterations = 5
 				for (let gz = 0; gz < gridHeight; gz++) {
 					const worldZ = (quartZ + gz) * heightScale
 					for (let gx = 0; gx < gridWidth; gx++) {
 						const worldX = (quartX + gx) * heightScale
-						let y = maxY
-						for (; y >= noiseSettings.minY; y -= cellHeight) {
-							const density = densityFn.compute(DensityFunction.context(worldX, y, worldZ))
-							if (density > 0.390625) {
-								break
+						let height = noiseSettings.minY
+						let prevY = maxY
+						let prevD = densityFn.compute(DensityFunction.context(worldX, prevY, worldZ))
+
+						if (prevD > threshold) {
+							height = prevY
+						} else {
+							for (let y = maxY - cellHeight; y >= noiseSettings.minY; y -= cellHeight) {
+								const d = densityFn.compute(DensityFunction.context(worldX, y, worldZ))
+								if (prevD <= threshold && d > threshold) {
+									// 跨越點找到，做二分搜尋
+									let low = y
+									let high = prevY
+									for (let i = 0; i < bisectIterations; i++) {
+										const mid = (low + high) * 0.5
+										const dm = densityFn.compute(DensityFunction.context(worldX, mid, worldZ))
+										if (dm > threshold) {
+											low = mid
+										} else {
+											high = mid
+										}
+									}
+									height = (low + high) * 0.5
+									break
+								}
+								prevY = y
+								prevD = d
 							}
 						}
-						data[idx++] = y
+						data[idx++] = height
 					}
 				}
 				heightmap = data
