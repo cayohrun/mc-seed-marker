@@ -45,6 +45,9 @@ interface CubiomesStructureQuery {
   ): Promise<void>
   getBastionType(blockX: number, blockZ: number): Promise<number | null>
   endCityHasShip(chunkX: number, chunkZ: number): Promise<boolean | null>
+  iglooHasBasement(blockX: number, blockZ: number, biomeID: number): Promise<boolean | null>
+  ruinedPortalIsGiant(blockX: number, blockZ: number, biomeID: number): Promise<boolean | null>
+  villageIsAbandoned(blockX: number, blockZ: number, biomeID: number): Promise<boolean | null>
 }
 
 // Cache for structure queries
@@ -68,6 +71,9 @@ let currentConfigKey = ''
 // Caches
 const bastionTypeCache = new Map<string, CacheEntry<number | null>>()
 const endCityShipCache = new Map<string, CacheEntry<boolean | null>>()
+const iglooBasementCache = new Map<string, CacheEntry<boolean | null>>()
+const ruinedPortalGiantCache = new Map<string, CacheEntry<boolean | null>>()
+const villageAbandonedCache = new Map<string, CacheEntry<boolean | null>>()
 
 /**
  * Initialize the worker (singleton)
@@ -132,6 +138,9 @@ async function configureWorker(settingsStore: ReturnType<typeof useSettingsStore
     currentConfigKey = newConfigKey
     bastionTypeCache.clear()
     endCityShipCache.clear()
+    iglooBasementCache.clear()
+    ruinedPortalGiantCache.clear()
+    villageAbandonedCache.clear()
   })()
 
   try {
@@ -221,9 +230,90 @@ export function useCubiomesStructure() {
     }
   }
 
+  /**
+   * Check if Igloo has a basement
+   * @param blockX Block X coordinate
+   * @param blockZ Block Z coordinate
+   * @param biomeID Biome ID at the location
+   * @returns true if has basement, false if not, null on failure/unknown
+   */
+  async function iglooHasBasement(blockX: number, blockZ: number, biomeID: number): Promise<boolean | null> {
+    await configureWorker(settingsStore)
+
+    const cacheKey = `${currentConfigKey}_${blockX}_${blockZ}_${biomeID}`
+    const cached = iglooBasementCache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.value
+    }
+
+    try {
+      const result = await queryInstance!.iglooHasBasement(blockX, blockZ, biomeID)
+      iglooBasementCache.set(cacheKey, { value: result, timestamp: Date.now() })
+      return result
+    } catch (error) {
+      console.error('[useCubiomesStructure] iglooHasBasement error:', error)
+      return null
+    }
+  }
+
+  /**
+   * Check if Ruined Portal is giant
+   * @param blockX Block X coordinate
+   * @param blockZ Block Z coordinate
+   * @param biomeID Biome ID at the location
+   * @returns true if giant, false if normal, null on failure/unknown
+   */
+  async function ruinedPortalIsGiant(blockX: number, blockZ: number, biomeID: number): Promise<boolean | null> {
+    await configureWorker(settingsStore)
+
+    const cacheKey = `${currentConfigKey}_${blockX}_${blockZ}_${biomeID}`
+    const cached = ruinedPortalGiantCache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.value
+    }
+
+    try {
+      const result = await queryInstance!.ruinedPortalIsGiant(blockX, blockZ, biomeID)
+      ruinedPortalGiantCache.set(cacheKey, { value: result, timestamp: Date.now() })
+      return result
+    } catch (error) {
+      console.error('[useCubiomesStructure] ruinedPortalIsGiant error:', error)
+      return null
+    }
+  }
+
+  /**
+   * Check if Village is abandoned (zombie village)
+   * @param blockX Block X coordinate
+   * @param blockZ Block Z coordinate
+   * @param biomeID Biome ID at the location
+   * @returns true if abandoned, false if normal, null on failure/unknown
+   */
+  async function villageIsAbandoned(blockX: number, blockZ: number, biomeID: number): Promise<boolean | null> {
+    await configureWorker(settingsStore)
+
+    const cacheKey = `${currentConfigKey}_${blockX}_${blockZ}_${biomeID}`
+    const cached = villageAbandonedCache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.value
+    }
+
+    try {
+      const result = await queryInstance!.villageIsAbandoned(blockX, blockZ, biomeID)
+      villageAbandonedCache.set(cacheKey, { value: result, timestamp: Date.now() })
+      return result
+    } catch (error) {
+      console.error('[useCubiomesStructure] villageIsAbandoned error:', error)
+      return null
+    }
+  }
+
   return {
     ready,
     getBastionType,
-    endCityHasShip
+    endCityHasShip,
+    iglooHasBasement,
+    ruinedPortalIsGiant,
+    villageIsAbandoned
   }
 }

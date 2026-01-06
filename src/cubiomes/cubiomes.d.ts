@@ -36,6 +36,9 @@ export interface CubiomesModule {
   _cubiomes_get_biome_at: (blockX: number, blockZ: number, yLevel: number) => number
   _cubiomes_get_bastion_type: (blockX: number, blockZ: number) => number
   _cubiomes_end_city_has_ship: (chunkX: number, chunkZ: number) => number
+  _cubiomes_igloo_has_basement: (blockX: number, blockZ: number, biomeID: number) => number
+  _cubiomes_ruined_portal_is_giant: (blockX: number, blockZ: number, biomeID: number) => number
+  _cubiomes_village_is_abandoned: (blockX: number, blockZ: number, biomeID: number) => number
   _cubiomes_alloc: (size: number) => number
   _cubiomes_free: (ptr: number) => void
   _cubiomes_get_mc_version: () => number

@@ -37,7 +37,7 @@ const loadedDimensionStore = useLoadedDimensionStore()
 const markersStore = useMarkersStore()
 const structureNotesStore = useStructureNotesStore()
 const i18n = useI18n()
-const { getBastionType, endCityHasShip } = useCubiomesStructure()
+const { getBastionType, endCityHasShip, iglooHasBasement, ruinedPortalIsGiant, villageIsAbandoned } = useCubiomesStructure()
 
 let biomeLayer: McseedmapBiomeLayer | CubiomesBiomeLayer
 let graticule: Graticule
@@ -574,7 +574,10 @@ function getMarker(structureId: Identifier, pos: BlockPos) {
     // 檢查是否需要顯示結構詳細資訊
     const isEndCity = structureIdStr === 'minecraft:end_city'
     const isBastion = structureIdStr === 'minecraft:bastion_remnant'
-    const needsStructureDetail = isEndCity || isBastion
+    const isIgloo = structureIdStr === 'minecraft:igloo'
+    const isRuinedPortal = structureIdStr.startsWith('minecraft:ruined_portal')
+    const isVillage = structureIdStr.startsWith('minecraft:village_')
+    const needsStructureDetail = isEndCity || isBastion || isIgloo || isRuinedPortal || isVillage
 
     // 創建彈窗內容生成函數
     const createPopupContent = () => {
@@ -637,29 +640,51 @@ function getMarker(structureId: Identifier, pos: BlockPos) {
         // 載入結構詳細資訊
         if (detailEl && needsStructureDetail) {
             try {
+                // Bastion variant names mapping (from cubiomes finders.c)
+                const BASTION_VARIANTS = ['Housing', 'Stables', 'Treasure', 'Bridge']
+
                 if (isEndCity) {
                     const chunkX = pos[0] >> 4
                     const chunkZ = pos[2] >> 4
                     const hasShip = await endCityHasShip(chunkX, chunkZ)
-                    if (hasShip === null) {
-                        detailEl.innerHTML = '<span style="color: #888;">Likely End City</span>'
-                    } else if (hasShip) {
-                        detailEl.innerHTML = '<span style="color: #4ade80;">End City (with ship)</span>'
+                    if (hasShip === true) {
+                        detailEl.innerHTML = '<span style="color: #4ade80;">Ship</span>'
                     } else {
-                        detailEl.innerHTML = '<span style="color: #facc15;">End City (without ship)</span>'
+                        // false 或 null 都不顯示額外文字
+                        detailEl.remove()
                     }
                 } else if (isBastion) {
                     const variant = await getBastionType(pos[0], pos[2])
-                    if (variant === null) {
-                        detailEl.innerHTML = '<span style="color: #888;">Bastion Remnant</span>'
+                    if (variant !== null && variant >= 0 && variant < BASTION_VARIANTS.length) {
+                        detailEl.innerHTML = `<span style="color: #f97316;">${BASTION_VARIANTS[variant]}</span>`
                     } else {
-                        // 只顯示 Variant X，不猜測類型名稱
-                        detailEl.innerHTML = `<span style="color: #f97316;">Bastion (Variant ${variant})</span>`
+                        detailEl.remove()
+                    }
+                } else if (isIgloo) {
+                    const hasBasement = await iglooHasBasement(pos[0], pos[2], 0)
+                    if (hasBasement === true) {
+                        detailEl.innerHTML = '<span style="color: #60a5fa;">Basement <span style="color: #888;">[50%]</span></span>'
+                    } else {
+                        detailEl.remove()
+                    }
+                } else if (isRuinedPortal) {
+                    const isGiant = await ruinedPortalIsGiant(pos[0], pos[2], 0)
+                    if (isGiant === true) {
+                        detailEl.innerHTML = '<span style="color: #a855f7;">Giant <span style="color: #888;">[5%]</span></span>'
+                    } else {
+                        detailEl.remove()
+                    }
+                } else if (isVillage) {
+                    const isAbandoned = await villageIsAbandoned(pos[0], pos[2], 0)
+                    if (isAbandoned === true) {
+                        detailEl.innerHTML = '<span style="color: #22c55e;">Zombie <span style="color: #888;">[2%]</span></span>'
+                    } else {
+                        detailEl.remove()
                     }
                 }
             } catch (err) {
                 console.error('[MainMap] Structure detail error:', err)
-                detailEl.innerHTML = '<span style="color: #666;">Unable to load details</span>'
+                detailEl.remove()
             }
         }
 

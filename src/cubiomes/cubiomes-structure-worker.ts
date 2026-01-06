@@ -15,6 +15,9 @@ let cubiomes_init: (major: number, minor: number, patch: number, largeBiomes: nu
 let cubiomes_set_seed: (seedLo: number, seedHi: number, dimension: number) => void
 let cubiomes_get_bastion_type: (blockX: number, blockZ: number) => number
 let cubiomes_end_city_has_ship: (chunkX: number, chunkZ: number) => number
+let cubiomes_igloo_has_basement: (blockX: number, blockZ: number, biomeID: number) => number
+let cubiomes_ruined_portal_is_giant: (blockX: number, blockZ: number, biomeID: number) => number
+let cubiomes_village_is_abandoned: (blockX: number, blockZ: number, biomeID: number) => number
 
 /**
  * Split 64-bit BigInt seed into two 32-bit numbers
@@ -51,6 +54,9 @@ const structureQuery = {
     cubiomes_set_seed = Module.cwrap('cubiomes_set_seed', null, ['number', 'number', 'number']) as typeof cubiomes_set_seed
     cubiomes_get_bastion_type = Module.cwrap('cubiomes_get_bastion_type', 'number', ['number', 'number']) as typeof cubiomes_get_bastion_type
     cubiomes_end_city_has_ship = Module.cwrap('cubiomes_end_city_has_ship', 'number', ['number', 'number']) as typeof cubiomes_end_city_has_ship
+    cubiomes_igloo_has_basement = Module.cwrap('cubiomes_igloo_has_basement', 'number', ['number', 'number', 'number']) as typeof cubiomes_igloo_has_basement
+    cubiomes_ruined_portal_is_giant = Module.cwrap('cubiomes_ruined_portal_is_giant', 'number', ['number', 'number', 'number']) as typeof cubiomes_ruined_portal_is_giant
+    cubiomes_village_is_abandoned = Module.cwrap('cubiomes_village_is_abandoned', 'number', ['number', 'number', 'number']) as typeof cubiomes_village_is_abandoned
 
     initialized = true
     console.log('[CubiomesStructure] WASM initialized')
@@ -95,6 +101,48 @@ const structureQuery = {
   endCityHasShip(chunkX: number, chunkZ: number): boolean | null {
     if (!initialized) return null
     const result = cubiomes_end_city_has_ship(chunkX, chunkZ)
+    if (result === -1) return null
+    return result === 1
+  },
+
+  /**
+   * Check if Igloo has a basement
+   * @param blockX Block X coordinate
+   * @param blockZ Block Z coordinate
+   * @param biomeID Biome ID at the location
+   * @returns true if has basement, false if not, null on failure
+   */
+  iglooHasBasement(blockX: number, blockZ: number, biomeID: number): boolean | null {
+    if (!initialized) return null
+    const result = cubiomes_igloo_has_basement(blockX, blockZ, biomeID)
+    if (result === -1) return null
+    return result === 1
+  },
+
+  /**
+   * Check if Ruined Portal is giant
+   * @param blockX Block X coordinate
+   * @param blockZ Block Z coordinate
+   * @param biomeID Biome ID at the location
+   * @returns true if giant, false if normal, null on failure
+   */
+  ruinedPortalIsGiant(blockX: number, blockZ: number, biomeID: number): boolean | null {
+    if (!initialized) return null
+    const result = cubiomes_ruined_portal_is_giant(blockX, blockZ, biomeID)
+    if (result === -1) return null
+    return result === 1
+  },
+
+  /**
+   * Check if Village is abandoned (zombie village)
+   * @param blockX Block X coordinate
+   * @param blockZ Block Z coordinate
+   * @param biomeID Biome ID at the location
+   * @returns true if abandoned, false if normal, null on failure
+   */
+  villageIsAbandoned(blockX: number, blockZ: number, biomeID: number): boolean | null {
+    if (!initialized) return null
+    const result = cubiomes_village_is_abandoned(blockX, blockZ, biomeID)
     if (result === -1) return null
     return result === 1
   }

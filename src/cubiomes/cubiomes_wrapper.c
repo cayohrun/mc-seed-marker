@@ -193,3 +193,51 @@ int cubiomes_end_city_has_ship(int chunkX, int chunkZ) {
     }
     return 0;
 }
+
+/**
+ * Check if Igloo has a basement
+ * @param blockX Block X coordinate
+ * @param blockZ Block Z coordinate
+ * @param biomeID Biome ID at the location
+ * @return 1 if has basement, 0 if no basement, -1 on failure
+ */
+EMSCRIPTEN_KEEPALIVE
+int cubiomes_igloo_has_basement(int blockX, int blockZ, int biomeID) {
+    if (!initialized) return -1;
+    StructureVariant sv;
+    int result = getVariant(&sv, Igloo, g.mc, g.seed, blockX, blockZ, biomeID);
+    if (result == 0) return -1;
+    return sv.basement ? 1 : 0;
+}
+
+/**
+ * Check if Ruined Portal is giant
+ * @param blockX Block X coordinate
+ * @param blockZ Block Z coordinate
+ * @param biomeID Biome ID at the location
+ * @return 1 if giant, 0 if normal, -1 on failure
+ */
+EMSCRIPTEN_KEEPALIVE
+int cubiomes_ruined_portal_is_giant(int blockX, int blockZ, int biomeID) {
+    if (!initialized) return -1;
+    StructureVariant sv;
+    int result = getVariant(&sv, Ruined_Portal, g.mc, g.seed, blockX, blockZ, biomeID);
+    if (result == 0) return -1;
+    return sv.giant ? 1 : 0;
+}
+
+/**
+ * Check if Village is abandoned (zombie village)
+ * @param blockX Block X coordinate
+ * @param blockZ Block Z coordinate
+ * @param biomeID Biome ID at the location
+ * @return 1 if abandoned, 0 if normal, -1 on failure
+ */
+EMSCRIPTEN_KEEPALIVE
+int cubiomes_village_is_abandoned(int blockX, int blockZ, int biomeID) {
+    if (!initialized) return -1;
+    StructureVariant sv;
+    int result = getVariant(&sv, Village, g.mc, g.seed, blockX, blockZ, biomeID);
+    if (result == 0) return -1;
+    return sv.abandoned ? 1 : 0;
+}
