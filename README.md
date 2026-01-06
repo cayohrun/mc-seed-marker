@@ -1,22 +1,17 @@
 # MC Seed Marker
 
-基於 [mc-datapack-map](https://github.com/jacobsjo/mc-datapack-map) 的 Minecraft 種子地圖工具，加入了**自訂標記功能**。
+Minecraft 種子地圖視覺化工具，基於 [jacobsjo/mc-seed-map](https://github.com/jacobsjo/mc-seed-map) 開源專案修改。
 
 ## 功能特色
 
-### 原有功能（繼承自 mc-datapack-map）
-- 🗺️ 輸入種子查看生態系地圖
+- 🗺️ 輸入種子即時查看生態系地圖
 - 🏛️ 顯示村莊、要塞、神殿等結構位置
 - 📦 支援載入 Datapack 和 Mod
 - 🌍 支援多維度（主世界、地獄、終界）
-- 🎮 支援 Minecraft 1.19 ~ 1.21.11 版本
-
-### 新增功能：自訂標記
-- 📍 **右鍵點擊地圖** 快速新增標記
-- ✏️ 自訂標記名稱、顏色（8種）、圖示（8種）
+- 🎮 支援 Minecraft 1.18 ~ 1.21.x 版本
+- 📍 自訂標記系統（右鍵新增、自訂顏色/圖示）
 - 💾 標記自動儲存到瀏覽器（IndexedDB）
-- 📤 匯出/匯入標記 (JSON 格式)
-- 🔍 點擊標記列表可跳轉到該位置
+- 📤 匯出/匯入標記（JSON 格式）
 
 ## 使用方式
 
@@ -59,18 +54,59 @@ npm run build
 
 ## 技術棧
 
-- Vue 3 + TypeScript
-- Vite
-- Leaflet (地圖渲染)
-- deepslate (Minecraft 資料處理)
-- Pinia (狀態管理)
-- idb-keyval (IndexedDB 儲存)
+- **框架**: Vue 3 + TypeScript + Vite
+- **地圖渲染**: Leaflet
+- **生態系渲染**: mcseedmap WASM（多 Worker 並行）
+- **結構計算**: deepslate
+- **狀態管理**: Pinia
+- **資料持久化**: IndexedDB (idb-keyval)
+- **國際化**: vue-i18n
 
-## 致謝
+## 資料架構
 
-- [jacobsjo/mc-datapack-map](https://github.com/jacobsjo/mc-datapack-map) - 原始專案
-- [misode/deepslate](https://github.com/misode/deepslate) - Minecraft 資料處理庫
+地圖渲染依賴三層資料：
+
+### 1. Vanilla Datapacks（遊戲規則）
+- 從 Minecraft JAR 提取的生態系定義、結構生成規則、維度設定
+- 來源：[misode/mcmeta](https://github.com/misode/mcmeta)（自動從 Minecraft 解包）
+- 路徑：`public/vanilla_datapacks/*.zip`
+
+### 2. Biome Tree（快查表）
+- 預計算的生態系查找表，座標 → 生態系 ID
+- 來源：[mcseedmap.net](https://mcseedmap.net)
+- 路徑：`src/mcseedmap/btree/*.dat`
+
+### 3. WASM 渲染引擎
+- Rust 編譯的 WebAssembly，模擬 Minecraft 世界生成
+- 來源：[mcseedmap.net](https://mcseedmap.net)
+- 路徑：`src/mcseedmap/mcseedmap.wasm`
+
+### 資料流程
+```
+用戶輸入種子 → WASM 讀取規則 → 查 biome tree → 套用顏色 → Leaflet 顯示
+```
+
+## 引用來源與致謝
+
+本專案使用了以下開源專案和資源，特此致謝：
+
+### 開源專案（MIT License）
+
+| 專案 | 用途 | 授權 |
+|------|------|------|
+| [jacobsjo/mc-seed-map](https://github.com/jacobsjo/mc-seed-map) | 專案架構、UI、Leaflet 整合 | MIT |
+| [jacobsjo/deepslate](https://github.com/jacobsjo/deepslate) | Minecraft 結構位置計算 | MIT |
+| [misode/mcmeta](https://github.com/misode/mcmeta) | Vanilla Datapacks 資料來源 | MIT |
+
+### 外部資源（計畫替換）
+
+| 來源 | 用途 | 說明 |
+|------|------|------|
+| [mcseedmap.net](https://mcseedmap.net) | WASM 引擎、Biome Tree | 閉源，計畫改用 [Cubiomes](https://github.com/Cubitect/cubiomes) 替換 |
+| [mcseedmap.net](https://mcseedmap.net) | 結構圖示 | 公開資源 |
 
 ## 授權
 
 MIT License
+
+本專案基於 [jacobsjo/mc-seed-map](https://github.com/jacobsjo/mc-seed-map) 修改，原始專案採用 MIT 授權。
