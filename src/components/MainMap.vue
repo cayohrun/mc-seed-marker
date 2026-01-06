@@ -2,7 +2,12 @@
 import "leaflet/dist/leaflet.css";
 import L, { control } from "leaflet";
 import { McseedmapBiomeLayer } from "../MapLayers/McseedmapBiomeLayer";
+import { CubiomesBiomeLayer } from "../MapLayers/CubiomesBiomeLayer";
 import { Graticule } from "../MapLayers/Graticule";
+
+// Feature flag: mcseedmap is the default renderer
+// Use ?cubiomes=1 to test cubiomes (experimental)
+const USE_CUBIOMES = new URLSearchParams(window.location.search).get('cubiomes') === '1'
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue';
 import { BlockPos, Chunk, ChunkPos, DensityFunction, Identifier, RandomState, Structure, StructurePlacement, StructureSet, WorldgenStructure } from 'deepslate';
 import { useSearchStore } from '../stores/useBiomeSearchStore';
@@ -29,7 +34,7 @@ const markersStore = useMarkersStore()
 const structureNotesStore = useStructureNotesStore()
 const i18n = useI18n()
 
-let biomeLayer: McseedmapBiomeLayer
+let biomeLayer: McseedmapBiomeLayer | CubiomesBiomeLayer
 let graticule: Graticule
 
 const tooltip_left = ref(0)
@@ -153,13 +158,26 @@ onMounted(() => {
     })
     zoom.addTo(map)
 
-    biomeLayer = new McseedmapBiomeLayer({
+    // mcseedmap is the default renderer
+    // Use ?cubiomes=1 to test cubiomes (experimental)
+    if (USE_CUBIOMES) {
+        console.log('[MainMap] Using CubiomesBiomeLayer (experimental)')
+        biomeLayer = new CubiomesBiomeLayer({
             tileSize: 256,
             minZoom: -100
         },
         do_hillshade,
         y
-    )
+        )
+    } else {
+        biomeLayer = new McseedmapBiomeLayer({
+            tileSize: 256,
+            minZoom: -100
+        },
+        do_hillshade,
+        y
+        )
+    }
 
     map.addLayer(biomeLayer)
 

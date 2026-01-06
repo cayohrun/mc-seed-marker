@@ -7,6 +7,7 @@
     "dev": "vite --force --host",
     "createZips": "python scripts/createVanillaZips.py",
     "build": "vue-tsc && vite build",
+    "build:cubiomes": "cd src/cubiomes && ./build.sh && cp cubiomes.wasm ../../public/wasm/",
     "preview": "vite preview --host"
   },
   "dependencies": {
