@@ -284,6 +284,5 @@ export const useLoadedDimensionStore = defineStore('loaded_dimension', () => {
         return biome_source
     }
 
-    return { loaded_dimension, noise_generator_settings, sampler, surface_density_function, terrain_density_function, reload, getIcon, getBiomeColor, getBiomeSource }
+    return { loaded_dimension, noise_generator_settings, random_state, sampler, surface_density_function, terrain_density_function, reload, getIcon, getBiomeColor, getBiomeSource }
 })
-
