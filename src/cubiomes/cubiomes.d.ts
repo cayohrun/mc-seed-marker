@@ -39,6 +39,7 @@ export interface CubiomesModule {
   _cubiomes_igloo_has_basement: (blockX: number, blockZ: number, biomeID: number) => number
   _cubiomes_ruined_portal_is_giant: (blockX: number, blockZ: number, biomeID: number) => number
   _cubiomes_village_is_abandoned: (blockX: number, blockZ: number, biomeID: number) => number
+  _cubiomes_scan_end_gateways: (chunkX: number, chunkZ: number, width: number, height: number, outPtr: number, maxResults: number) => number
   _cubiomes_alloc: (size: number) => number
   _cubiomes_free: (ptr: number) => void
   _cubiomes_get_mc_version: () => number

@@ -18,9 +18,16 @@ const settingsStore = useSettingsStore()
 // 根據當前維度過濾結構
 const filteredStructures = computed(() => {
     const dimensionId = settingsStore.dimension.toString()
-    return WorldgenStructure.REGISTRY.keys()
+    const structures = [...WorldgenStructure.REGISTRY.keys()]
         .filter(id => !loadedDimensionStore.loaded_dimension.hidden_structures?.has(id.toString()))
         .filter(id => isStructureInDimension(id.toString(), dimensionId))
+
+    // 在 End 維度添加 End Gateway（由 cubiomes 計算，不在 deepslate registry 中）
+    if (dimensionId === 'minecraft:the_end') {
+        structures.push(Identifier.parse('minecraft:end_gateway'))
+    }
+
+    return structures
 })
 
 function toggleStructure(structure: Identifier){

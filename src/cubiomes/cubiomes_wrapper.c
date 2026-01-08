@@ -241,3 +241,40 @@ int cubiomes_village_is_abandoned(int blockX, int blockZ, int biomeID) {
     if (result == 0) return -1;
     return sv.abandoned ? 1 : 0;
 }
+
+/**
+ * Scan for End Gateways in a region
+ * @param chunkX Starting chunk X coordinate
+ * @param chunkZ Starting chunk Z coordinate
+ * @param width Width in chunks
+ * @param height Height in chunks
+ * @param outPtr Output buffer for positions (x, z pairs as block coords)
+ * @param maxResults Maximum number of results to return
+ * @return Number of gateways found, -1 on failure
+ */
+EMSCRIPTEN_KEEPALIVE
+int cubiomes_scan_end_gateways(int chunkX, int chunkZ, int width, int height, int* outPtr, int maxResults) {
+    if (!initialized || !outPtr) return -1;
+    if (g.mc < MC_1_13) return 0;  // End Gateway only supported from 1.13+
+
+    int count = 0;
+    Pos pos;
+
+    for (int cz = chunkZ; cz < chunkZ + height && count < maxResults; cz++) {
+        for (int cx = chunkX; cx < chunkX + width && count < maxResults; cx++) {
+            // getStructurePos for End_Gateway uses chunk coords as region coords
+            // because regionSize=1 for decorator features
+            if (getStructurePos(End_Gateway, g.mc, g.seed, cx, cz, &pos)) {
+                // Check if it's in a valid biome (end_highlands)
+                int biomeId = getBiomeAt(&g, 16, pos.x >> 4, 0, pos.z >> 4);
+                if (isViableFeatureBiome(g.mc, End_Gateway, biomeId)) {
+                    outPtr[count * 2] = pos.x;
+                    outPtr[count * 2 + 1] = pos.z;
+                    count++;
+                }
+            }
+        }
+    }
+
+    return count;
+}

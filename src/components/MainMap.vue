@@ -37,7 +37,7 @@ const loadedDimensionStore = useLoadedDimensionStore()
 const markersStore = useMarkersStore()
 const structureNotesStore = useStructureNotesStore()
 const i18n = useI18n()
-const { getBastionType, endCityHasShip, iglooHasBasement, ruinedPortalIsGiant, villageIsAbandoned } = useCubiomesStructure()
+const { getBastionType, endCityHasShip, iglooHasBasement, ruinedPortalIsGiant, villageIsAbandoned, scanEndGateways } = useCubiomesStructure()
 
 let biomeLayer: McseedmapBiomeLayer | CubiomesBiomeLayer
 let graticule: Graticule
@@ -136,6 +136,7 @@ var spawnMarker: L.Marker
 
 var marker_map = new Map<string, { marker?: L.Marker, structure?: {id: Identifier, pos: BlockPos}}>()
 var user_marker_map = new Map<string, L.Marker>()
+var gateway_marker_map = new Map<string, L.Marker>()  // End Gateway markers (computed by cubiomes)
 var needs_zoom = ref(false)
 
 
@@ -564,6 +565,121 @@ function updateMarkers() {
     }
 
     needs_zoom.value = _needs_zoom
+
+    // End Gateway 掃描（僅在 End 維度且啟用 end_gateway 時）
+    updateEndGateways(minChunk, maxChunk)
+}
+
+/**
+ * 更新 End Gateway markers（由 cubiomes 計算）
+ */
+async function updateEndGateways(minChunk: ChunkPos, maxChunk: ChunkPos) {
+    const dimensionId = settingsStore.dimension.toString()
+    const isEndDimension = dimensionId === 'minecraft:the_end'
+    const gatewayEnabled = searchStore.structures.has('minecraft:end_gateway')
+
+    // 如果不是 End 維度或未啟用 gateway，清空所有 gateway markers
+    if (!isEndDimension || !gatewayEnabled) {
+        for (const marker of gateway_marker_map.values()) {
+            marker.remove()
+        }
+        gateway_marker_map.clear()
+        return
+    }
+
+    // 計算掃描範圍（chunk 座標）
+    const width = maxChunk[0] - minChunk[0] + 1
+    const height = maxChunk[1] - minChunk[1] + 1
+
+    // 限制掃描範圍（與 End City minZoom=-4 對應，約 1000 chunks）
+    if (width > 1000 || height > 1000) {
+        return  // 範圍太大，不掃描
+    }
+
+    try {
+        const gateways = await scanEndGateways(minChunk[0], minChunk[1], width, height, 500)
+
+        // 追蹤本次應保留的 markers
+        const keptGateways = new Set<string>()
+
+        for (const gateway of gateways) {
+            const key = `gateway_${gateway.x}_${gateway.z}`
+            keptGateways.add(key)
+
+            // 如果已存在，跳過
+            if (gateway_marker_map.has(key)) continue
+
+            // 創建新 marker
+            const marker = createEndGatewayMarker(gateway.x, gateway.z)
+            gateway_marker_map.set(key, marker)
+        }
+
+        // 移除不在視窗範圍內的 markers
+        for (const [key, marker] of gateway_marker_map.entries()) {
+            if (!keptGateways.has(key)) {
+                marker.remove()
+                gateway_marker_map.delete(key)
+            }
+        }
+    } catch (error) {
+        console.error('[MainMap] End Gateway scan error:', error)
+    }
+}
+
+/**
+ * 創建 End Gateway marker
+ */
+function createEndGatewayMarker(blockX: number, blockZ: number): L.Marker {
+    const crs = map.options.crs!
+    const mapPos = new L.Point(blockX, -blockZ)
+    const structureId = Identifier.parse('minecraft:end_gateway')
+
+    // 使用末影之眼圖示（End Gateway 沒有專用圖示）
+    const icon = L.divIcon({
+        className: 'end-gateway-icon',
+        html: `
+            <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
+                <img src="https://raw.githubusercontent.com/jacobsjo/mcicons/icons/item/ender_eye.png"
+                     style="width: 32px; height: 32px; filter: drop-shadow(0 0 3px rgba(128,0,255,0.8)) drop-shadow(0 0 1px rgba(0,0,0,0.8));" />
+            </div>
+        `,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+        popupAnchor: [0, -10]
+    })
+
+    const marker = L.marker(crs.unproject(mapPos), { icon })
+    marker.addTo(markers)
+
+    // 創建彈窗
+    const popupContent = `
+        <div class="structure-popup">
+            <div class="structure-name">End Gateway</div>
+            <div class="structure-coords">${i18n.t("map.coords.xz", {x: blockX, z: blockZ})}</div>
+        </div>
+    `
+    marker.bindPopup(popupContent)
+
+    return marker
+}
+
+/**
+ * 創建帶有鞘翅疊加的 End City 圖示
+ */
+function createEndCityWithShipIcon(baseIconUrl: string): L.DivIcon {
+    return L.divIcon({
+        className: 'end-city-ship-icon',
+        html: `
+            <div style="position: relative; width: 32px; height: 32px;">
+                <img src="${baseIconUrl}" style="width: 32px; height: 32px;" />
+                <img src="https://raw.githubusercontent.com/jacobsjo/mcicons/icons/item/elytra.png"
+                     style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));" />
+            </div>
+        `,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+        popupAnchor: [0, -10]
+    })
 }
 
 function getMarker(structureId: Identifier, pos: BlockPos) {
@@ -731,6 +847,20 @@ function getMarker(structureId: Identifier, pos: BlockPos) {
         shadowAnchor: [20, 20],
         popupAnchor: [0, -10]
     }))
+
+    // End City 異步查詢是否有 Ship，有的話更新圖示
+    if (isEndCity) {
+        const chunkX = pos[0] >> 4
+        const chunkZ = pos[2] >> 4
+        endCityHasShip(chunkX, chunkZ).then(hasShip => {
+            if (hasShip === true) {
+                marker.setIcon(createEndCityWithShipIcon(iconUrl))
+            }
+        }).catch(err => {
+            console.error('[MainMap] End City ship check error:', err)
+        })
+    }
+
     return marker
 }
 

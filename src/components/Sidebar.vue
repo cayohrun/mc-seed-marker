@@ -40,14 +40,23 @@ const showSlimeChunks = ref(false)
 // 結構列表（根據當前維度過濾）
 const availableStructures = computed(() => {
   const dimensionId = settingsStore.dimension.toString()
-  return [...WorldgenStructure.REGISTRY.keys()]
+  const structures = [...WorldgenStructure.REGISTRY.keys()]
     .filter(id => !loadedDimensionStore.loaded_dimension.hidden_structures?.has(id.toString()))
     .filter(id => isStructureInDimension(id.toString(), dimensionId))
     .map(id => ({
       id: id.toString(),
       name: settingsStore.getLocalizedName('structure', id, false)
     }))
-    .sort((a, b) => a.name.localeCompare(b.name))
+
+  // 在 End 維度添加 End Gateway（由 cubiomes 計算，不在 deepslate registry 中）
+  if (dimensionId === 'minecraft:the_end') {
+    structures.push({
+      id: 'minecraft:end_gateway',
+      name: 'End Gateway'
+    })
+  }
+
+  return structures.sort((a, b) => a.name.localeCompare(b.name))
 })
 
 const allStructuresSelected = computed(() => {

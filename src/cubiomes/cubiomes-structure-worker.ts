@@ -18,6 +18,9 @@ let cubiomes_end_city_has_ship: (chunkX: number, chunkZ: number) => number
 let cubiomes_igloo_has_basement: (blockX: number, blockZ: number, biomeID: number) => number
 let cubiomes_ruined_portal_is_giant: (blockX: number, blockZ: number, biomeID: number) => number
 let cubiomes_village_is_abandoned: (blockX: number, blockZ: number, biomeID: number) => number
+let cubiomes_scan_end_gateways: (chunkX: number, chunkZ: number, width: number, height: number, outPtr: number, maxResults: number) => number
+let cubiomes_alloc: (size: number) => number
+let cubiomes_free: (ptr: number) => void
 
 /**
  * Split 64-bit BigInt seed into two 32-bit numbers
@@ -57,6 +60,9 @@ const structureQuery = {
     cubiomes_igloo_has_basement = Module.cwrap('cubiomes_igloo_has_basement', 'number', ['number', 'number', 'number']) as typeof cubiomes_igloo_has_basement
     cubiomes_ruined_portal_is_giant = Module.cwrap('cubiomes_ruined_portal_is_giant', 'number', ['number', 'number', 'number']) as typeof cubiomes_ruined_portal_is_giant
     cubiomes_village_is_abandoned = Module.cwrap('cubiomes_village_is_abandoned', 'number', ['number', 'number', 'number']) as typeof cubiomes_village_is_abandoned
+    cubiomes_scan_end_gateways = Module.cwrap('cubiomes_scan_end_gateways', 'number', ['number', 'number', 'number', 'number', 'number', 'number']) as typeof cubiomes_scan_end_gateways
+    cubiomes_alloc = Module.cwrap('cubiomes_alloc', 'number', ['number']) as typeof cubiomes_alloc
+    cubiomes_free = Module.cwrap('cubiomes_free', null, ['number']) as typeof cubiomes_free
 
     initialized = true
     console.log('[CubiomesStructure] WASM initialized')
@@ -145,6 +151,40 @@ const structureQuery = {
     const result = cubiomes_village_is_abandoned(blockX, blockZ, biomeID)
     if (result === -1) return null
     return result === 1
+  },
+
+  /**
+   * Scan for End Gateways in a region
+   * @param chunkX Starting chunk X coordinate
+   * @param chunkZ Starting chunk Z coordinate
+   * @param width Width in chunks
+   * @param height Height in chunks
+   * @param maxResults Maximum results (default 100)
+   * @returns Array of {x, z} block coordinates, empty array on failure
+   */
+  scanEndGateways(chunkX: number, chunkZ: number, width: number, height: number, maxResults: number = 100): Array<{x: number, z: number}> {
+    if (!initialized || !Module) return []
+
+    // Allocate buffer for results (x, z pairs)
+    const bufferSize = maxResults * 2
+    const ptr = cubiomes_alloc(bufferSize)
+    if (!ptr) return []
+
+    try {
+      const count = cubiomes_scan_end_gateways(chunkX, chunkZ, width, height, ptr, maxResults)
+      if (count <= 0) return []
+
+      // Read results from WASM memory
+      const results: Array<{x: number, z: number}> = []
+      for (let i = 0; i < count; i++) {
+        const x = Module.HEAP32[(ptr >> 2) + i * 2]
+        const z = Module.HEAP32[(ptr >> 2) + i * 2 + 1]
+        results.push({ x, z })
+      }
+      return results
+    } finally {
+      cubiomes_free(ptr)
+    }
   }
 }
 

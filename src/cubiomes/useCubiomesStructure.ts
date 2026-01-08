@@ -48,6 +48,7 @@ interface CubiomesStructureQuery {
   iglooHasBasement(blockX: number, blockZ: number, biomeID: number): Promise<boolean | null>
   ruinedPortalIsGiant(blockX: number, blockZ: number, biomeID: number): Promise<boolean | null>
   villageIsAbandoned(blockX: number, blockZ: number, biomeID: number): Promise<boolean | null>
+  scanEndGateways(chunkX: number, chunkZ: number, width: number, height: number, maxResults?: number): Promise<Array<{x: number, z: number}>>
 }
 
 // Cache for structure queries
@@ -308,12 +309,40 @@ export function useCubiomesStructure() {
     }
   }
 
+  /**
+   * Scan for End Gateways in a region
+   * @param chunkX Starting chunk X coordinate
+   * @param chunkZ Starting chunk Z coordinate
+   * @param width Width in chunks
+   * @param height Height in chunks
+   * @param maxResults Maximum results (default 100)
+   * @returns Array of {x, z} block coordinates
+   */
+  async function scanEndGateways(
+    chunkX: number,
+    chunkZ: number,
+    width: number,
+    height: number,
+    maxResults: number = 100
+  ): Promise<Array<{x: number, z: number}>> {
+    await configureWorker(settingsStore)
+
+    try {
+      const result = await queryInstance!.scanEndGateways(chunkX, chunkZ, width, height, maxResults)
+      return result
+    } catch (error) {
+      console.error('[useCubiomesStructure] scanEndGateways error:', error)
+      return []
+    }
+  }
+
   return {
     ready,
     getBastionType,
     endCityHasShip,
     iglooHasBasement,
     ruinedPortalIsGiant,
-    villageIsAbandoned
+    villageIsAbandoned,
+    scanEndGateways
   }
 }
