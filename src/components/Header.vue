@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { Identifier } from 'deepslate'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useI18n } from 'vue-i18n'
@@ -8,6 +8,49 @@ import { EventTracker } from '../util/EventTracker'
 
 const settingsStore = useSettingsStore()
 const i18n = useI18n()
+
+// Renderer toggle state - default to mcseedmap (faster)
+const useCubiomes = ref(false)
+const isLoading = ref(false)
+
+// Emit event for MainMap to handle
+const emit = defineEmits<{
+    (e: 'renderer-change', useCubiomes: boolean): void
+}>()
+
+// Initialize from URL param
+onMounted(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    const renderer = urlParams.get('renderer')
+    if (renderer === 'cubiomes') {
+        useCubiomes.value = true
+    }
+})
+
+// Toggle renderer
+async function toggleRenderer() {
+    if (isLoading.value) return
+
+    isLoading.value = true
+    useCubiomes.value = !useCubiomes.value
+
+    // Update URL - cubiomes needs param, mcseedmap is default
+    if (useCubiomes.value) {
+        updateUrlParam('renderer', 'cubiomes')
+    } else {
+        updateUrlParam('renderer', null)  // Remove param for default
+    }
+
+    // Emit event for MainMap
+    emit('renderer-change', useCubiomes.value)
+
+    // Loading state will be cleared by MainMap after switch completes
+    setTimeout(() => {
+        isLoading.value = false
+    }, 800)
+
+    EventTracker.track(`switch_renderer/${useCubiomes.value ? 'cubiomes' : 'mcseedmap'}`)
+}
 
 function updateLocale(locale: string) {
     i18n.locale.value = locale
@@ -86,15 +129,20 @@ const setDimension = (id: string) => {
                 </select>
             </div>
 
-            <!-- Online Status -->
-            <div class="flex items-center gap-2 px-3 py-1.5 bg-black/40 border border-white/10">
-                <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                <span class="text-lg text-text-secondary font-pixel pt-1">Online</span>
-            </div>
-
-            <!-- Login Button -->
-            <button class="mc-button h-10 px-6 flex items-center justify-center text-lg font-pixel transition-none">
-                LOG IN
+            <!-- Renderer Toggle -->
+            <button
+                @click="toggleRenderer"
+                class="flex items-center gap-2 px-3 py-1.5 bg-black/40 border border-white/10 cursor-pointer hover:bg-black/60 transition-colors"
+                :title="isLoading ? 'Switching...' : `Click to switch to ${useCubiomes ? 'mcseedmap' : 'cubiomes'}`"
+                :disabled="isLoading"
+            >
+                <span
+                    class="w-2 h-2 rounded-full"
+                    :class="isLoading ? 'bg-yellow-500 animate-spin' : (useCubiomes ? 'bg-green-500 animate-pulse' : 'bg-red-500')"
+                ></span>
+                <span class="text-lg text-text-secondary font-pixel pt-1">
+                    {{ isLoading ? 'Switching...' : (useCubiomes ? 'cubiomes' : 'mcseedmap') }}
+                </span>
             </button>
         </div>
     </header>

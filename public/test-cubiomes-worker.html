@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Cubiomes Worker Integration Test</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #eee; }
+    .success { color: #4caf50; }
+    .error { color: #f44336; }
+    #log { white-space: pre-wrap; line-height: 1.6; }
+    canvas { border: 1px solid #444; margin: 10px 5px; }
+    .tiles { display: flex; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <h1>Cubiomes Worker Integration Test</h1>
+  <div id="log">Starting test...</div>
+  <div class="tiles" id="tiles"></div>
+
+  <script type="module">
+    import * as Comlink from 'https://unpkg.com/comlink@4.4.2/dist/esm/comlink.mjs';
+
+    const log = document.getElementById('log');
+    const tilesContainer = document.getElementById('tiles');
+
+    function addLog(msg, isError = false) {
+      const span = document.createElement('span');
+      span.className = isError ? 'error' : 'success';
+      span.textContent = msg + '\n';
+      log.appendChild(span);
+      console.log(msg);
+    }
+
+    // Create a canvas for a tile
+    function createTileCanvas(title) {
+      const container = document.createElement('div');
+      container.style.textAlign = 'center';
+
+      const label = document.createElement('div');
+      label.textContent = title;
+      label.style.fontSize = '12px';
+      label.style.marginBottom = '4px';
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+
+      container.appendChild(label);
+      container.appendChild(canvas);
+      tilesContainer.appendChild(container);
+
+      return canvas;
+    }
+
+    // Decode BMP to ImageData
+    function decodeBMP(buffer) {
+      const view = new DataView(buffer);
+
+      // Verify BMP header
+      if (view.getUint8(0) !== 0x42 || view.getUint8(1) !== 0x4D) {
+        throw new Error('Invalid BMP header');
+      }
+
+      const pixelOffset = view.getUint32(10, true);
+      const width = view.getInt32(18, true);
+      const height = Math.abs(view.getInt32(22, true));
+      const bpp = view.getUint16(28, true);
+
+      if (bpp !== 24) {
+        throw new Error(`Unsupported BPP: ${bpp}`);
+      }
+
+      const imageData = new ImageData(width, height);
+      const rowSize = Math.ceil((width * 3) / 4) * 4; // Row aligned to 4 bytes
+
+      for (let y = 0; y < height; y++) {
+        // BMP is bottom-up
+        const srcRow = height - 1 - y;
+        const srcOffset = pixelOffset + srcRow * rowSize;
+
+        for (let x = 0; x < width; x++) {
+          const srcIdx = srcOffset + x * 3;
+          const dstIdx = (y * width + x) * 4;
+
+          // BMP is BGR
+          imageData.data[dstIdx] = view.getUint8(srcIdx + 2);     // R
+          imageData.data[dstIdx + 1] = view.getUint8(srcIdx + 1); // G
+          imageData.data[dstIdx + 2] = view.getUint8(srcIdx);     // B
+          imageData.data[dstIdx + 3] = 255;                        // A
+        }
+      }
+
+      return imageData;
+    }
+
+    async function runTest() {
+      try {
+        // Test 1: Create worker with Comlink
+        addLog('[1/5] Creating cubiomes worker with Comlink...');
+
+        // Use Vite's native worker import
+        const worker = new Worker(
+          new URL('/src/cubiomes/cubiomes-worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+
+        const generator = Comlink.wrap(worker);
+        addLog('[1/5] Worker created!');
+
+        // Test 2: Initialize WASM
+        addLog('[2/5] Initializing WASM module...');
+        await generator.initialize('/wasm/cubiomes.wasm');
+        addLog('[2/5] WASM initialized!');
+
+        // Test 3: Configure generator
+        addLog('[3/5] Configuring generator (MC 1.21.4, seed 12345)...');
+        const seed = 12345n;
+        generator.configure(
+          seed,       // seed
+          256,        // tileSize
+          0,          // library (unused)
+          1,          // versionMajor
+          21,         // versionMinor
+          4,          // versionPatch
+          0,          // dimension (overworld)
+          false       // largeBiomes
+        );
+        addLog('[3/5] Generator configured!');
+
+        // Test 4: Generate tiles at different zoom levels
+        addLog('[4/5] Generating test tiles...');
+
+        const testCases = [
+          { zoomOffset: -4, x: 0, z: 0, label: 'Zoom -4 (0,0)' },
+          { zoomOffset: -2, x: 0, z: 0, label: 'Zoom -2 (0,0)' },
+          { zoomOffset: 0, x: 0, z: 0, label: 'Zoom 0 (0,0)' },
+          { zoomOffset: 0, x: 256, z: 256, label: 'Zoom 0 (256,256)' },
+        ];
+
+        for (const tc of testCases) {
+          const startTime = performance.now();
+
+          const buffer = await generator.generateBiomeImage(
+            tc.zoomOffset,    // zoomOffset
+            tc.x,             // blockX
+            tc.z,             // blockZ
+            64,               // yLevel
+            1,                // shaderKind (Simple)
+            0,                // contourKind
+            false,            // useFade
+            false,            // useDesaturate
+            false,            // useHighlight
+            new Uint16Array(0), // highlightedBiomes
+            new Uint16Array(0), // fadedBiomes
+            0,                // fadeColor
+            0,                // biomeCount
+            false             // showSlime
+          );
+
+          const elapsed = (performance.now() - startTime).toFixed(2);
+          addLog(`  ${tc.label}: ${elapsed}ms, ${buffer.byteLength} bytes`);
+
+          // Decode and render
+          const canvas = createTileCanvas(`${tc.label} (${elapsed}ms)`);
+          const ctx = canvas.getContext('2d');
+          const imageData = decodeBMP(buffer);
+          ctx.putImageData(imageData, 0, 0);
+        }
+
+        addLog('[4/5] Tiles generated!');
+
+        // Test 5: Test dimension switching
+        addLog('[5/5] Testing dimension switch to Nether...');
+        generator.configure(seed, 256, 0, 1, 21, 4, -1, false);
+
+        const netherBuffer = await generator.generateBiomeImage(
+          -2, 0, 0, 64, 1, 0, false, false, false,
+          new Uint16Array(0), new Uint16Array(0), 0, 0, false
+        );
+
+        const netherCanvas = createTileCanvas('Nether Zoom -2');
+        const netherCtx = netherCanvas.getContext('2d');
+        netherCtx.putImageData(decodeBMP(netherBuffer), 0, 0);
+        addLog('[5/5] Dimension switch successful!');
+
+        addLog('\n=== ALL INTEGRATION TESTS PASSED ===');
+
+        // Cleanup
+        worker.terminate();
+
+      } catch (err) {
+        addLog(`ERROR: ${err.message}`, true);
+        console.error(err);
+      }
+    }
+
+    runTest();
+  </script>
+</body>
+</html>

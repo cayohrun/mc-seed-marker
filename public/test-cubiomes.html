@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Cubiomes Worker Test</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #eee; }
+    .success { color: #4caf50; }
+    .error { color: #f44336; }
+    #log { white-space: pre-wrap; line-height: 1.6; }
+    canvas { border: 1px solid #444; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Cubiomes WASM Test</h1>
+  <div id="log">Starting test...</div>
+  <canvas id="output" width="256" height="256"></canvas>
+
+  <script type="module">
+    const log = document.getElementById('log');
+    const canvas = document.getElementById('output');
+    const ctx = canvas.getContext('2d');
+
+    function addLog(msg, isError = false) {
+      const span = document.createElement('span');
+      span.className = isError ? 'error' : 'success';
+      span.textContent = msg + '\n';
+      log.appendChild(span);
+      console.log(msg);
+    }
+
+    async function runTest() {
+      try {
+        // Test 1: Load WASM module directly
+        addLog('[1/4] Loading Cubiomes WASM module...');
+        const CubiomesModule = (await import('/src/cubiomes/cubiomes.js')).default;
+
+        const Module = await CubiomesModule({
+          locateFile: (path) => {
+            if (path.endsWith('.wasm')) {
+              return '/wasm/cubiomes.wasm';
+            }
+            return path;
+          }
+        });
+        addLog('[1/4] WASM module loaded!');
+
+        // Test 2: Get function wrappers
+        addLog('[2/4] Getting function wrappers...');
+        const cubiomes_init = Module.cwrap('cubiomes_init', null, ['number', 'number', 'number', 'number']);
+        const cubiomes_set_seed = Module.cwrap('cubiomes_set_seed', null, ['number', 'number', 'number']);
+        const cubiomes_gen_biomes = Module.cwrap('cubiomes_gen_biomes', 'number', ['number', 'number', 'number', 'number', 'number', 'number', 'number']);
+        const cubiomes_alloc = Module.cwrap('cubiomes_alloc', 'number', ['number']);
+        const cubiomes_free = Module.cwrap('cubiomes_free', null, ['number']);
+        addLog('[2/4] Functions wrapped!');
+
+        // Test 3: Initialize generator
+        addLog('[3/4] Initializing generator for MC 1.21.4...');
+        cubiomes_init(1, 21, 4, 0); // MC 1.21.4, normal biomes
+
+        // Set seed (using a known seed)
+        const testSeed = 12345n;
+        const seedLo = Number(testSeed & 0xFFFFFFFFn);
+        const seedHi = Number((testSeed >> 32n) & 0xFFFFFFFFn);
+        cubiomes_set_seed(seedLo, seedHi, 0); // Overworld
+        addLog('[3/4] Generator initialized with seed 12345!');
+
+        // Test 4: Generate a small biome map
+        addLog('[4/4] Generating 256x256 biome map at (0, 0)...');
+        const size = 256;
+        const scale = 4; // 1 pixel = 4 blocks
+        const ptr = cubiomes_alloc(size * size);
+
+        const startTime = performance.now();
+        const result = cubiomes_gen_biomes(0, 0, size, size, scale, 64, ptr);
+        const elapsed = (performance.now() - startTime).toFixed(2);
+
+        if (result !== 0) {
+          throw new Error(`Generation failed with code: ${result}`);
+        }
+        addLog(`[4/4] Generated in ${elapsed}ms!`);
+
+        // Read biome IDs and render
+        const biomeIds = new Int32Array(Module.HEAP32.buffer, ptr, size * size);
+
+        // Simple color mapping for visualization
+        const BIOME_COLORS = {
+          0: [0, 0, 112],      // ocean
+          1: [141, 179, 96],   // plains
+          2: [250, 148, 24],   // desert
+          4: [5, 102, 33],     // forest
+          5: [11, 102, 89],    // taiga
+          6: [7, 249, 178],    // swamp
+          7: [0, 0, 255],      // river
+          21: [83, 123, 9],    // jungle
+          27: [48, 116, 68],   // birch_forest
+          29: [64, 81, 26],    // dark_forest
+          35: [189, 178, 95],  // savanna
+          37: [217, 69, 21],   // badlands
+        };
+
+        const imageData = ctx.createImageData(size, size);
+        let biomeCount = {};
+
+        for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+            const biomeId = biomeIds[y * size + x];
+            biomeCount[biomeId] = (biomeCount[biomeId] || 0) + 1;
+
+            const color = BIOME_COLORS[biomeId] || [128, 128, 128];
+            const idx = (y * size + x) * 4;
+            imageData.data[idx] = color[0];
+            imageData.data[idx + 1] = color[1];
+            imageData.data[idx + 2] = color[2];
+            imageData.data[idx + 3] = 255;
+          }
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+
+        // Free memory
+        cubiomes_free(ptr);
+
+        // Show biome distribution
+        const sortedBiomes = Object.entries(biomeCount)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5);
+
+        addLog('\nTop 5 biomes found:');
+        for (const [id, count] of sortedBiomes) {
+          const pct = ((count / (size * size)) * 100).toFixed(1);
+          addLog(`  Biome ${id}: ${count} pixels (${pct}%)`);
+        }
+
+        addLog('\n=== ALL TESTS PASSED ===');
+
+      } catch (err) {
+        addLog(`ERROR: ${err.message}`, true);
+        console.error(err);
+      }
+    }
+
+    runTest();
+  </script>
+</body>
+</html>

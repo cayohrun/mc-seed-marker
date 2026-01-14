@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Biome Renderer Comparison: Cubiomes vs mcseedmap</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #eee; }
+    .success { color: #4caf50; }
+    .error { color: #f44336; }
+    .warn { color: #ff9800; }
+    #log { white-space: pre-wrap; line-height: 1.6; max-height: 300px; overflow-y: auto; margin-bottom: 20px; }
+    .compare-row { display: flex; gap: 20px; margin: 20px 0; flex-wrap: wrap; }
+    .tile-container { text-align: center; }
+    .tile-container canvas { border: 1px solid #444; }
+    .tile-label { font-size: 12px; margin-bottom: 5px; }
+    .diff-stats { background: #333; padding: 10px; margin: 5px 0; font-size: 11px; }
+    button { background: #4caf50; color: white; border: none; padding: 10px 20px; cursor: pointer; margin: 5px; }
+    button:hover { background: #45a049; }
+    button:disabled { background: #666; cursor: not-allowed; }
+    .controls { margin-bottom: 20px; }
+    input, select { background: #333; color: #eee; border: 1px solid #444; padding: 5px; margin: 5px; }
+  </style>
+</head>
+<body>
+  <h1>Biome Renderer Comparison</h1>
+  <div class="controls">
+    <label>Seed: <input type="text" id="seed" value="12345"></label>
+    <label>Zoom Offset: <input type="number" id="zoomOffset" value="-2" min="-6" max="4"></label>
+    <label>X: <input type="number" id="blockX" value="0"></label>
+    <label>Z: <input type="number" id="blockZ" value="0"></label>
+    <label>Dimension:
+      <select id="dimension">
+        <option value="0">Overworld</option>
+        <option value="-1">Nether</option>
+        <option value="1">The End</option>
+      </select>
+    </label>
+    <label>Hillshade: <input type="checkbox" id="hillshade" checked></label>
+    <br>
+    <button onclick="runComparison()">Compare Tiles</button>
+    <button onclick="runBatchComparison()">Batch Compare (10 tiles)</button>
+  </div>
+  <div id="log">Ready...</div>
+  <div id="results"></div>
+
+  <script type="module">
+    import * as Comlink from 'https://unpkg.com/comlink@4.4.2/dist/esm/comlink.mjs';
+
+    const log = document.getElementById('log');
+    const resultsDiv = document.getElementById('results');
+
+    function addLog(msg, type = 'success') {
+      const span = document.createElement('span');
+      span.className = type;
+      span.textContent = msg + '\n';
+      log.appendChild(span);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function clearLog() {
+      log.innerHTML = '';
+    }
+
+    // Decode BMP to ImageData
+    function decodeBMP(buffer) {
+      const view = new DataView(buffer);
+      if (view.getUint8(0) !== 0x42 || view.getUint8(1) !== 0x4D) {
+        throw new Error('Invalid BMP header');
+      }
+      const pixelOffset = view.getUint32(10, true);
+      const width = view.getInt32(18, true);
+      const height = Math.abs(view.getInt32(22, true));
+      const bpp = view.getUint16(28, true);
+
+      const imageData = new ImageData(width, height);
+      const rowSize = Math.ceil((width * (bpp / 8)) / 4) * 4;
+
+      for (let y = 0; y < height; y++) {
+        const srcRow = height - 1 - y;
+        const srcOffset = pixelOffset + srcRow * rowSize;
+
+        for (let x = 0; x < width; x++) {
+          const dstIdx = (y * width + x) * 4;
+          if (bpp === 24) {
+            const srcIdx = srcOffset + x * 3;
+            imageData.data[dstIdx] = view.getUint8(srcIdx + 2);     // R
+            imageData.data[dstIdx + 1] = view.getUint8(srcIdx + 1); // G
+            imageData.data[dstIdx + 2] = view.getUint8(srcIdx);     // B
+            imageData.data[dstIdx + 3] = 255;                        // A
+          } else if (bpp === 32) {
+            const srcIdx = srcOffset + x * 4;
+            imageData.data[dstIdx] = view.getUint8(srcIdx + 2);     // R
+            imageData.data[dstIdx + 1] = view.getUint8(srcIdx + 1); // G
+            imageData.data[dstIdx + 2] = view.getUint8(srcIdx);     // B
+            imageData.data[dstIdx + 3] = view.getUint8(srcIdx + 3); // A
+          }
+        }
+      }
+      return imageData;
+    }
+
+    // Compare two ImageData and return diff stats
+    function compareImages(img1, img2) {
+      if (img1.width !== img2.width || img1.height !== img2.height) {
+        return { error: 'Size mismatch' };
+      }
+
+      const width = img1.width;
+      const height = img1.height;
+      const diffData = new ImageData(width, height);
+
+      let totalDiff = 0;
+      let maxDiff = 0;
+      let diffPixels = 0;
+      const channelDiffs = { r: 0, g: 0, b: 0 };
+
+      for (let i = 0; i < img1.data.length; i += 4) {
+        const r1 = img1.data[i], g1 = img1.data[i+1], b1 = img1.data[i+2];
+        const r2 = img2.data[i], g2 = img2.data[i+1], b2 = img2.data[i+2];
+
+        const dr = Math.abs(r1 - r2);
+        const dg = Math.abs(g1 - g2);
+        const db = Math.abs(b1 - b2);
+        const pixelDiff = dr + dg + db;
+
+        channelDiffs.r += dr;
+        channelDiffs.g += dg;
+        channelDiffs.b += db;
+
+        if (pixelDiff > 0) {
+          diffPixels++;
+          totalDiff += pixelDiff;
+          maxDiff = Math.max(maxDiff, pixelDiff);
+
+          // Highlight diff in diff image (red intensity based on diff)
+          diffData.data[i] = Math.min(255, pixelDiff * 4);
+          diffData.data[i+1] = 0;
+          diffData.data[i+2] = 0;
+          diffData.data[i+3] = 255;
+        } else {
+          // Show original image where no diff
+          diffData.data[i] = Math.floor((r1 + r2) / 2 * 0.3);
+          diffData.data[i+1] = Math.floor((g1 + g2) / 2 * 0.3);
+          diffData.data[i+2] = Math.floor((b1 + b2) / 2 * 0.3);
+          diffData.data[i+3] = 255;
+        }
+      }
+
+      const totalPixels = width * height;
+      return {
+        totalPixels,
+        diffPixels,
+        diffPercent: (diffPixels / totalPixels * 100).toFixed(2),
+        avgDiff: diffPixels > 0 ? (totalDiff / diffPixels / 3).toFixed(2) : 0,
+        maxDiff: (maxDiff / 3).toFixed(2),
+        channelDiffs,
+        diffImageData: diffData
+      };
+    }
+
+    let cubiomesWorker = null;
+    let cubiomesGen = null;
+    let mcseedmapWorker = null;
+    let mcseedmapGen = null;
+
+    async function initWorkers() {
+      if (!cubiomesGen) {
+        addLog('Initializing Cubiomes worker...');
+        cubiomesWorker = new Worker(
+          new URL('/src/cubiomes/cubiomes-worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+        cubiomesGen = Comlink.wrap(cubiomesWorker);
+        await cubiomesGen.initialize('/wasm/cubiomes.wasm');
+        addLog('Cubiomes worker ready');
+      }
+
+      if (!mcseedmapGen) {
+        addLog('Initializing mcseedmap worker...');
+        try {
+          mcseedmapWorker = new Worker(
+            new URL('/src/mcseedmap/mcseedmap-worker.ts', import.meta.url),
+            { type: 'module' }
+          );
+          mcseedmapGen = Comlink.wrap(mcseedmapWorker);
+          await mcseedmapGen.initialize('/wasm/mcseedmap.wasm');
+          addLog('mcseedmap worker ready');
+        } catch (e) {
+          addLog('mcseedmap worker not available: ' + e.message, 'warn');
+          mcseedmapGen = null;
+        }
+      }
+    }
+
+    function createTileDisplay(label) {
+      const container = document.createElement('div');
+      container.className = 'tile-container';
+
+      const labelDiv = document.createElement('div');
+      labelDiv.className = 'tile-label';
+      labelDiv.textContent = label;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+
+      container.appendChild(labelDiv);
+      container.appendChild(canvas);
+      return { container, canvas };
+    }
+
+    async function generateCubiomesTile(seed, zoomOffset, blockX, blockZ, dimension, hillshade) {
+      cubiomesGen.configure(
+        BigInt(seed),
+        256,
+        0,
+        1, 21, 4,  // MC 1.21.4
+        dimension,
+        false
+      );
+
+      const start = performance.now();
+      const buffer = await cubiomesGen.generateBiomeImage(
+        zoomOffset, blockX, blockZ,
+        64,  // yLevel
+        hillshade ? 1 : 0,
+        0, false, false, false,
+        new Uint16Array(0), new Uint16Array(0),
+        0, 0, false
+      );
+      const elapsed = performance.now() - start;
+
+      return { buffer, elapsed };
+    }
+
+    window.runComparison = async function() {
+      clearLog();
+      resultsDiv.innerHTML = '';
+
+      const seed = document.getElementById('seed').value;
+      const zoomOffset = parseInt(document.getElementById('zoomOffset').value);
+      const blockX = parseInt(document.getElementById('blockX').value);
+      const blockZ = parseInt(document.getElementById('blockZ').value);
+      const dimension = parseInt(document.getElementById('dimension').value);
+      const hillshade = document.getElementById('hillshade').checked;
+
+      try {
+        await initWorkers();
+
+        const row = document.createElement('div');
+        row.className = 'compare-row';
+
+        // Generate Cubiomes tile
+        addLog(`Generating Cubiomes tile...`);
+        const cubiomesResult = await generateCubiomesTile(seed, zoomOffset, blockX, blockZ, dimension, hillshade);
+        const cubiomesImg = decodeBMP(cubiomesResult.buffer);
+
+        const cubiomesDisplay = createTileDisplay(`Cubiomes (${cubiomesResult.elapsed.toFixed(1)}ms)`);
+        const cubiomesCtx = cubiomesDisplay.canvas.getContext('2d');
+        cubiomesCtx.putImageData(cubiomesImg, 0, 0);
+        row.appendChild(cubiomesDisplay.container);
+
+        addLog(`Cubiomes: ${cubiomesResult.elapsed.toFixed(1)}ms, ${cubiomesResult.buffer.byteLength} bytes`);
+
+        // If mcseedmap available, compare
+        if (mcseedmapGen) {
+          addLog(`Generating mcseedmap tile...`);
+          // Note: mcseedmap uses different API, would need adaptation
+          // For now, show placeholder
+          const mcseedmapDisplay = createTileDisplay('mcseedmap (N/A)');
+          row.appendChild(mcseedmapDisplay.container);
+          addLog('mcseedmap comparison requires btree - skipped', 'warn');
+        } else {
+          // Show info about no mcseedmap
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'tile-container';
+          infoDiv.innerHTML = `
+            <div class="tile-label">mcseedmap</div>
+            <div style="width:256px;height:256px;background:#333;display:flex;align-items:center;justify-content:center;font-size:11px;padding:10px;box-sizing:border-box">
+              mcseedmap worker not available.<br>
+              This is expected since we're replacing it with Cubiomes.
+            </div>
+          `;
+          row.appendChild(infoDiv);
+        }
+
+        resultsDiv.appendChild(row);
+
+        addLog('');
+        addLog('=== Comparison complete ===');
+        addLog(`Cubiomes tile generation: ${cubiomesResult.elapsed.toFixed(1)}ms`);
+
+      } catch (err) {
+        addLog(`ERROR: ${err.message}`, 'error');
+        console.error(err);
+      }
+    };
+
+    window.runBatchComparison = async function() {
+      clearLog();
+      resultsDiv.innerHTML = '<h3>Batch Test Results</h3>';
+
+      const seed = document.getElementById('seed').value;
+      const hillshade = document.getElementById('hillshade').checked;
+
+      const testCases = [
+        { zoomOffset: -4, x: 0, z: 0, dim: 0, label: 'Overworld Z-4' },
+        { zoomOffset: -2, x: 0, z: 0, dim: 0, label: 'Overworld Z-2' },
+        { zoomOffset: 0, x: 0, z: 0, dim: 0, label: 'Overworld Z0' },
+        { zoomOffset: 0, x: 512, z: -512, dim: 0, label: 'Overworld Z0 offset' },
+        { zoomOffset: 2, x: 0, z: 0, dim: 0, label: 'Overworld Z2' },
+        { zoomOffset: -2, x: 0, z: 0, dim: -1, label: 'Nether Z-2' },
+        { zoomOffset: 0, x: 0, z: 0, dim: -1, label: 'Nether Z0' },
+        { zoomOffset: -2, x: 0, z: 0, dim: 1, label: 'The End Z-2' },
+        { zoomOffset: 0, x: 0, z: 0, dim: 1, label: 'The End Z0' },
+        { zoomOffset: 0, x: 1024, z: 1024, dim: 1, label: 'The End offset' },
+      ];
+
+      try {
+        await initWorkers();
+
+        const times = [];
+
+        for (const tc of testCases) {
+          addLog(`Testing: ${tc.label}...`);
+
+          const result = await generateCubiomesTile(seed, tc.zoomOffset, tc.x, tc.z, tc.dim, hillshade);
+          times.push(result.elapsed);
+
+          const row = document.createElement('div');
+          row.className = 'compare-row';
+
+          const display = createTileDisplay(`${tc.label} (${result.elapsed.toFixed(1)}ms)`);
+          const ctx = display.canvas.getContext('2d');
+          ctx.putImageData(decodeBMP(result.buffer), 0, 0);
+          row.appendChild(display.container);
+
+          resultsDiv.appendChild(row);
+        }
+
+        addLog('');
+        addLog('=== Batch Complete ===');
+        const avgTime = times.reduce((a, b) => a + b, 0) / times.length;
+        addLog(`Average time: ${avgTime.toFixed(1)}ms per tile`);
+        addLog(`Min: ${Math.min(...times).toFixed(1)}ms, Max: ${Math.max(...times).toFixed(1)}ms`);
+
+      } catch (err) {
+        addLog(`ERROR: ${err.message}`, 'error');
+        console.error(err);
+      }
+    };
+  </script>
+</body>
+</html>

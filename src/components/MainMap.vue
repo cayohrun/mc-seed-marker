@@ -4,11 +4,12 @@ import L, { control } from "leaflet";
 import { McseedmapBiomeLayer } from "../MapLayers/McseedmapBiomeLayer";
 import { CubiomesBiomeLayer } from "../MapLayers/CubiomesBiomeLayer";
 import { Graticule } from "../MapLayers/Graticule";
-
-// Feature flag: mcseedmap is the default renderer
-// Use ?cubiomes=1 to test cubiomes (experimental)
-const USE_CUBIOMES = new URLSearchParams(window.location.search).get('cubiomes') === '1'
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue';
+
+// Props for renderer switching
+const props = defineProps<{
+  useCubiomes: boolean
+}>()
 import { BlockPos, Chunk, ChunkPos, DensityFunction, Identifier, RandomState, Structure, StructurePlacement, StructureSet, WorldgenStructure } from 'deepslate';
 import { useSearchStore } from '../stores/useBiomeSearchStore';
 import { useSettingsStore } from '../stores/useSettingsStore';
@@ -41,6 +42,36 @@ const { getBastionType, endCityHasShip, iglooHasBasement, ruinedPortalIsGiant, v
 
 let biomeLayer: McseedmapBiomeLayer | CubiomesBiomeLayer
 let graticule: Graticule
+
+// Helper function to create biome layer
+function createBiomeLayer(useCubiomes: boolean): McseedmapBiomeLayer | CubiomesBiomeLayer {
+    const options = { tileSize: 256, minZoom: -100 }
+    if (useCubiomes) {
+        console.log('[MainMap] Creating CubiomesBiomeLayer')
+        return new CubiomesBiomeLayer(options, do_hillshade, y)
+    } else {
+        console.log('[MainMap] Creating McseedmapBiomeLayer')
+        return new McseedmapBiomeLayer(options, do_hillshade, y)
+    }
+}
+
+// Watch for renderer switching (hot reload)
+watch(() => props.useCubiomes, (newValue, oldValue) => {
+    if (newValue === oldValue) return
+    if (!map) return
+
+    console.log(`[MainMap] Switching renderer: ${oldValue ? 'cubiomes' : 'mcseedmap'} -> ${newValue ? 'cubiomes' : 'mcseedmap'}`)
+
+    // Remove old layer (triggers onRemove to cleanup workers)
+    map.removeLayer(biomeLayer)
+
+    // Create new layer
+    biomeLayer = createBiomeLayer(newValue)
+
+    // Add to map (below markers)
+    map.addLayer(biomeLayer)
+    biomeLayer.bringToBack()
+})
 
 const tooltip_left = ref(0)
 const tooltip_top = ref(0)
@@ -164,27 +195,8 @@ onMounted(() => {
     })
     zoom.addTo(map)
 
-    // mcseedmap is the default renderer
-    // Use ?cubiomes=1 to test cubiomes (experimental)
-    if (USE_CUBIOMES) {
-        console.log('[MainMap] Using CubiomesBiomeLayer (experimental)')
-        biomeLayer = new CubiomesBiomeLayer({
-            tileSize: 256,
-            minZoom: -100
-        },
-        do_hillshade,
-        y
-        )
-    } else {
-        biomeLayer = new McseedmapBiomeLayer({
-            tileSize: 256,
-            minZoom: -100
-        },
-        do_hillshade,
-        y
-        )
-    }
-
+    // Create initial biome layer based on prop
+    biomeLayer = createBiomeLayer(props.useCubiomes)
     map.addLayer(biomeLayer)
 
     spawnMarker = L.marker({lat: 0, lng: 0}, {

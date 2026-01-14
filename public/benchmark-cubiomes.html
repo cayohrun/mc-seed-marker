@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Cubiomes Performance Benchmark</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #eee; }
+    .success { color: #4caf50; }
+    .error { color: #f44336; }
+    .warn { color: #ff9800; }
+    #log { white-space: pre-wrap; line-height: 1.6; max-height: 400px; overflow-y: auto; }
+    table { border-collapse: collapse; margin: 20px 0; }
+    th, td { border: 1px solid #444; padding: 8px 12px; text-align: right; }
+    th { background: #333; }
+    .benchmark-result { background: #2a2a4e; }
+    button { background: #4caf50; color: white; border: none; padding: 10px 20px; cursor: pointer; margin: 5px; }
+    button:hover { background: #45a049; }
+    button:disabled { background: #666; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <h1>Cubiomes Performance Benchmark</h1>
+  <div>
+    <button id="runBtn" onclick="runBenchmark()">Run Full Benchmark</button>
+    <button id="quickBtn" onclick="runQuickBenchmark()">Quick Test (5 tiles)</button>
+  </div>
+  <div id="log">Ready to benchmark...</div>
+  <div id="results"></div>
+
+  <script type="module">
+    import * as Comlink from 'https://unpkg.com/comlink@4.4.2/dist/esm/comlink.mjs';
+
+    const log = document.getElementById('log');
+    const results = document.getElementById('results');
+
+    function addLog(msg, type = 'success') {
+      const span = document.createElement('span');
+      span.className = type;
+      span.textContent = msg + '\n';
+      log.appendChild(span);
+      log.scrollTop = log.scrollHeight;
+      console.log(msg);
+    }
+
+    // Test configurations
+    const TEST_CONFIGS = [
+      // Overworld tests at different zoom levels
+      { dimension: 0, zoomOffset: -4, x: 0, z: 0, label: 'Overworld Z-4 (0,0)' },
+      { dimension: 0, zoomOffset: -2, x: 0, z: 0, label: 'Overworld Z-2 (0,0)' },
+      { dimension: 0, zoomOffset: 0, x: 0, z: 0, label: 'Overworld Z0 (0,0)' },
+      { dimension: 0, zoomOffset: 0, x: 256, z: 256, label: 'Overworld Z0 (256,256)' },
+      { dimension: 0, zoomOffset: 0, x: -512, z: 512, label: 'Overworld Z0 (-512,512)' },
+      { dimension: 0, zoomOffset: 2, x: 0, z: 0, label: 'Overworld Z2 (0,0)' },
+      // Nether tests
+      { dimension: -1, zoomOffset: -2, x: 0, z: 0, label: 'Nether Z-2 (0,0)' },
+      { dimension: -1, zoomOffset: 0, x: 0, z: 0, label: 'Nether Z0 (0,0)' },
+      // The End tests
+      { dimension: 1, zoomOffset: -2, x: 0, z: 0, label: 'The End Z-2 (0,0)' },
+      { dimension: 1, zoomOffset: 0, x: 0, z: 0, label: 'The End Z0 (0,0)' },
+    ];
+
+    const QUICK_CONFIGS = TEST_CONFIGS.slice(0, 5);
+
+    async function createWorker() {
+      const worker = new Worker(
+        new URL('/src/cubiomes/cubiomes-worker.ts', import.meta.url),
+        { type: 'module' }
+      );
+      const generator = Comlink.wrap(worker);
+      await generator.initialize('/wasm/cubiomes.wasm');
+      return { worker, generator };
+    }
+
+    async function benchmarkSingle(generator, config, iterations = 10) {
+      const times = [];
+
+      for (let i = 0; i < iterations; i++) {
+        const start = performance.now();
+        await generator.generateBiomeImage(
+          config.zoomOffset,
+          config.x,
+          config.z,
+          64, // yLevel
+          1,  // shaderKind (Simple hillshade)
+          0,  // contourKind
+          false, false, false,
+          new Uint16Array(0),
+          new Uint16Array(0),
+          0, 0, false
+        );
+        times.push(performance.now() - start);
+      }
+
+      return {
+        min: Math.min(...times),
+        max: Math.max(...times),
+        avg: times.reduce((a, b) => a + b, 0) / times.length,
+        p95: times.sort((a, b) => a - b)[Math.floor(times.length * 0.95)],
+        times
+      };
+    }
+
+    async function runBenchmarkInternal(configs, iterations) {
+      document.getElementById('runBtn').disabled = true;
+      document.getElementById('quickBtn').disabled = true;
+      log.innerHTML = '';
+      results.innerHTML = '';
+
+      try {
+        addLog(`[Benchmark] Starting with ${configs.length} configs, ${iterations} iterations each`);
+
+        // Create worker
+        addLog('[1/3] Creating worker...');
+        const { worker, generator } = await createWorker();
+        addLog('[1/3] Worker ready!');
+
+        // Configure for MC 1.21.4
+        addLog('[2/3] Configuring generator...');
+        const seed = 12345n;
+
+        const allResults = [];
+
+        addLog(`[3/3] Running benchmarks...`);
+
+        for (const config of configs) {
+          // Reconfigure for each dimension
+          generator.configure(seed, 256, 0, 1, 21, 4, config.dimension, false);
+
+          addLog(`  Testing: ${config.label}...`);
+          const result = await benchmarkSingle(generator, config, iterations);
+          allResults.push({ config, result });
+          addLog(`    Avg: ${result.avg.toFixed(2)}ms, Min: ${result.min.toFixed(2)}ms, Max: ${result.max.toFixed(2)}ms`);
+        }
+
+        // Generate results table
+        let tableHtml = `
+          <h2>Benchmark Results</h2>
+          <p>Seed: ${seed}, MC Version: 1.21.4, Iterations: ${iterations}</p>
+          <table>
+            <tr>
+              <th>Test Case</th>
+              <th>Dimension</th>
+              <th>Zoom</th>
+              <th>Avg (ms)</th>
+              <th>Min (ms)</th>
+              <th>Max (ms)</th>
+              <th>P95 (ms)</th>
+            </tr>
+        `;
+
+        let totalAvg = 0;
+        for (const { config, result } of allResults) {
+          totalAvg += result.avg;
+          const dimName = config.dimension === 0 ? 'Overworld' : config.dimension === -1 ? 'Nether' : 'The End';
+          tableHtml += `
+            <tr class="benchmark-result">
+              <td style="text-align:left">${config.label}</td>
+              <td>${dimName}</td>
+              <td>${config.zoomOffset}</td>
+              <td>${result.avg.toFixed(2)}</td>
+              <td>${result.min.toFixed(2)}</td>
+              <td>${result.max.toFixed(2)}</td>
+              <td>${result.p95.toFixed(2)}</td>
+            </tr>
+          `;
+        }
+
+        const overallAvg = totalAvg / allResults.length;
+        tableHtml += `
+            <tr style="font-weight:bold; background:#333">
+              <td colspan="3">Overall Average</td>
+              <td>${overallAvg.toFixed(2)}</td>
+              <td colspan="3">Tiles/sec: ${(1000 / overallAvg).toFixed(1)}</td>
+            </tr>
+          </table>
+        `;
+
+        results.innerHTML = tableHtml;
+
+        // Summary
+        addLog('');
+        addLog('=== BENCHMARK COMPLETE ===');
+        addLog(`Overall average: ${overallAvg.toFixed(2)}ms per tile`);
+        addLog(`Estimated throughput: ${(1000 / overallAvg).toFixed(1)} tiles/sec (single worker)`);
+
+        // With 9 workers
+        const parallelThroughput = (1000 / overallAvg) * 9;
+        addLog(`With 9 workers: ~${parallelThroughput.toFixed(0)} tiles/sec`);
+
+        // Cleanup
+        worker.terminate();
+
+      } catch (err) {
+        addLog(`ERROR: ${err.message}`, 'error');
+        console.error(err);
+      } finally {
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('quickBtn').disabled = false;
+      }
+    }
+
+    window.runBenchmark = () => runBenchmarkInternal(TEST_CONFIGS, 20);
+    window.runQuickBenchmark = () => runBenchmarkInternal(QUICK_CONFIGS, 5);
+  </script>
+</body>
+</html>
