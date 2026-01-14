@@ -38,7 +38,7 @@ async function toggleRenderer() {
     if (useCubiomes.value) {
         updateUrlParam('renderer', 'cubiomes')
     } else {
-        updateUrlParam('renderer', null)  // Remove param for default
+        updateUrlParam('renderer', undefined)  // Remove param for default
     }
 
     // Emit event for MainMap
