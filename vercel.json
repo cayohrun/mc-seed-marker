@@ -8,12 +8,8 @@
   ],
   "rewrites": [
     {
-      "source": "/seedmap/",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/seedmap/:path(.*)",
-      "destination": "/:path"
+      "source": "/seedmap/:match*",
+      "destination": "/:match*"
     }
   ]
 }
