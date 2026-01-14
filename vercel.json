@@ -1,0 +1,15 @@
+{
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/seedmap/",
+      "permanent": false
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/seedmap/(.*)",
+      "destination": "/seedmap/$1"
+    }
+  ]
+}
