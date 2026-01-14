@@ -8,6 +8,14 @@
   ],
   "rewrites": [
     {
+      "source": "/seedmap",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/seedmap/",
+      "destination": "/index.html"
+    },
+    {
       "source": "/seedmap/:match*",
       "destination": "/:match*"
     }
